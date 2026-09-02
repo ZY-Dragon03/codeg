@@ -1436,11 +1436,164 @@ fn agent_debug_callback(
     }
 }
 
+/// Strip Cursor parameterized suffixes from a stored model id.
+/// `composer-2.5[fast=true]` → `composer-2.5`.
+fn cursor_cli_model_id(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let base = trimmed
+        .split_once('[')
+        .map(|(head, _)| head)
+        .unwrap_or(trimmed)
+        .trim();
+    if base.is_empty() {
+        None
+    } else {
+        Some(base.to_string())
+    }
+}
+
+fn cursor_model_is_composer(model_id: &str) -> bool {
+    model_id.to_ascii_lowercase().contains("composer")
+}
+
+fn is_cursor_effort_config_id(config_id: &str) -> bool {
+    matches!(
+        config_id,
+        "effort" | "reasoning_effort" | "thought_level"
+    )
+}
+
+fn cursor_preferred_flag_on(preferred: &BTreeMap<String, String>, key: &str) -> bool {
+    preferred.get(key).is_some_and(|v| {
+        let t = v.trim();
+        t == "1" || t.eq_ignore_ascii_case("true") || t.eq_ignore_ascii_case("yes")
+    })
+}
+
+fn cursor_preferred_effort<'a>(preferred: &'a BTreeMap<String, String>) -> Option<&'a str> {
+    ["effort", "reasoning_effort", "thought_level"]
+        .iter()
+        .find_map(|key| preferred.get(*key).map(String::as_str))
+}
+
+/// ACP / settings family id → cursor-agent `--model` family.
+/// `grok-4.6` is a parameterized picker id; the CLI catalog is `cursor-grok-4.6-*`.
+fn cursor_cli_family_id(base: &str) -> String {
+    let lower = base.to_ascii_lowercase();
+    if lower.starts_with("cursor-grok-") {
+        return lower;
+    }
+    if let Some(rest) = lower.strip_prefix("grok-") {
+        return format!("cursor-grok-{rest}");
+    }
+    base.to_string()
+}
+
+fn cursor_cli_id_has_variant_suffix(id: &str) -> bool {
+    let lower = id.to_ascii_lowercase();
+    lower.ends_with("-fast")
+        || lower.ends_with("-none")
+        || lower.ends_with("-low")
+        || lower.ends_with("-medium")
+        || lower.ends_with("-high")
+        || lower.ends_with("-xhigh")
+        || lower.ends_with("-max")
+}
+
+fn cursor_grok_effort_suffix(raw: Option<&str>) -> &'static str {
+    let Some(raw) = raw else {
+        return "high";
+    };
+    match raw
+        .trim()
+        .to_ascii_lowercase()
+        .replace('_', "-")
+        .replace(' ', "-")
+        .as_str()
+    {
+        "none" | "minimal" | "min" => "low",
+        "low" => "low",
+        "medium" | "mid" | "default" => "medium",
+        "xhigh" | "x-high" | "extra-high" | "max" => "xhigh",
+        _ => "high",
+    }
+}
+
+/// Model id for Cursor's root `--model` flag.
+///
+/// ACP `session/set_config_option` uses parameterized ids (`grok-4.6` +
+/// `effort`/`fast`). `cursor-agent --model` only accepts catalog ids such as
+/// `cursor-grok-4.6-high`. Passing the ACP id makes the CLI exit 1 before ACP
+/// starts (then Codeg reconnects — the ~30s red banner).
+fn cursor_launch_model_id(
+    runtime_env: &BTreeMap<String, String>,
+    preferred_config_values: &BTreeMap<String, String>,
+) -> Option<String> {
+    let raw = preferred_config_values
+        .get("model")
+        .map(String::as_str)
+        .or_else(|| runtime_env.get("CURSOR_MODEL").map(String::as_str))?;
+    let base = cursor_cli_model_id(raw)?;
+    let family = cursor_cli_family_id(&base);
+    let fast = cursor_preferred_flag_on(preferred_config_values, "fast");
+    let effort = cursor_preferred_effort(preferred_config_values);
+
+    if family.starts_with("cursor-grok-") {
+        if cursor_cli_id_has_variant_suffix(&family) {
+            return Some(family);
+        }
+        let mut id = format!("{family}-{}", cursor_grok_effort_suffix(effort));
+        if fast {
+            id.push_str("-fast");
+        }
+        return Some(id);
+    }
+
+    if cursor_model_is_composer(&family) {
+        if fast && !family.to_ascii_lowercase().ends_with("-fast") {
+            return Some(format!("{family}-fast"));
+        }
+        return Some(family);
+    }
+
+    Some(family)
+}
+
+/// Inject Cursor CLI root flags (`--model`, optional `--force`) before `acp`.
+/// `--model` applies to every Cursor ACP backend (built-in and custom).
+/// `--force` (Run Everything) is read from `CURSOR_FORCE` in the agent's
+/// env_json for any cursor-agent … acp launch, not only the built-in Cursor row.
+fn inject_cursor_root_launch_flags(
+    cmd_args: &mut Vec<String>,
+    agent_type: AgentType,
+    runtime_env: &BTreeMap<String, String>,
+    preferred_config_values: &BTreeMap<String, String>,
+) {
+    if !registry::uses_cursor_acp_backend(agent_type) {
+        return;
+    }
+    if let Some(model) = cursor_launch_model_id(runtime_env, preferred_config_values) {
+        cmd_args.insert(0, "--model".to_string());
+        cmd_args.insert(1, model);
+    }
+    if runtime_env
+        .get("CURSOR_FORCE")
+        .map(|v| v.trim())
+        .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+    {
+        cmd_args.insert(0, "--force".to_string());
+    }
+}
+
 async fn build_agent(
     agent_type: AgentType,
     runtime_env: &BTreeMap<String, String>,
     cwd: &Path,
     stderr_tail: &Arc<StderrTail>,
+    preferred_config_values: &BTreeMap<String, String>,
 ) -> Result<AcpAgent, AcpError> {
     // A conversation can outlive the custom-agent definition it was started
     // with (the user deleted it in settings). `get_agent_meta` cannot report
@@ -1492,6 +1645,9 @@ async fn build_agent(
                 }
             }
             let mut merged_env = merge_agent_env(env, runtime_env);
+            if registry::uses_cursor_acp_backend(agent_type) {
+                crate::commands::acp::ensure_cursor_http1_for_launch(&merged_env);
+            }
             // Resolve the config-derived preset HERE (like Grok's
             // `grok_launch_permission_mode` below) so the policy helper stays a
             // pure function over the env list.
@@ -1663,40 +1819,25 @@ async fn build_agent(
                 .unwrap_or(0);
             let mut server = McpServerStdio::new(meta.name, &binary_str);
             let mut cmd_args: Vec<String> = args.iter().map(|a| (*a).to_string()).collect();
-            // Cursor's ROOT-level `--model <id>` flag precedes the `acp`
-            // subcommand and sets the session's default model. Sourced from
-            // the Cursor panel's default-model control (env_json key
-            // CURSOR_MODEL — a codeg-side launch knob; the CLI itself reads
-            // no model env var).
-            if agent_type == AgentType::Cursor {
-                if let Some(model) = runtime_env
-                    .get("CURSOR_MODEL")
-                    .map(|v| v.trim())
-                    .filter(|v| !v.is_empty())
-                {
-                    cmd_args.insert(0, "--model".to_string());
-                    cmd_args.insert(1, model.to_string());
-                }
-                // Root `--force` = Run Everything: the ACP session swaps its
-                // permission prompter for an auto-allow one, so tool calls
-                // never reach session/request_permission (deny rules still
-                // apply, and an org policy can downgrade it to rule-based
-                // approval). Sourced from the panel's permission-mode
-                // control (env_json key CURSOR_FORCE — codeg-side knob; the
-                // CLI reads no such env var).
-                if runtime_env
-                    .get("CURSOR_FORCE")
-                    .map(|v| v.trim())
-                    .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                {
-                    cmd_args.insert(0, "--force".to_string());
-                }
-            }
+            // Cursor's ROOT-level `--model <id>` / `--force` flags precede the
+            // `acp` subcommand. `--model` is the only reliable way to pin the
+            // session model for built-in Cursor and custom wrappers alike;
+            // `session/set_config_option` after connect often loses to the
+            // CLI's last-used default.
+            inject_cursor_root_launch_flags(
+                &mut cmd_args,
+                agent_type,
+                runtime_env,
+                preferred_config_values,
+            );
             let cmd_args_for_log = cmd_args.clone();
             if !cmd_args.is_empty() {
                 server = server.args(cmd_args);
             }
             let mut merged_env = merge_agent_env(env, runtime_env);
+            if registry::uses_cursor_acp_backend(agent_type) {
+                crate::commands::acp::ensure_cursor_http1_for_launch(&merged_env);
+            }
             if agent_type == AgentType::Cursor {
                 apply_cursor_env_policy(&mut merged_env, runtime_env);
             } else if agent_type == AgentType::Grok {
@@ -1771,6 +1912,9 @@ async fn build_agent(
             ..
         } => {
             let merged_env = merge_agent_env(env, runtime_env);
+            if registry::uses_cursor_acp_backend(agent_type) {
+                crate::commands::acp::ensure_cursor_http1_for_launch(&merged_env);
+            }
             let mut parts: Vec<String> = Vec::new();
             for (k, v) in &merged_env {
                 parts.push(format!("{k}={v}"));
@@ -1935,7 +2079,13 @@ pub async fn spawn_agent_connection(
     // turn is diagnosed as silently empty. Created here so both the spawn side
     // and the conversation loop share the same buffer.
     let stderr_tail = Arc::new(StderrTail::new());
-    let agent = build_agent(agent_type, &runtime_env, &launch_cwd, &stderr_tail)
+    let agent = build_agent(
+        agent_type,
+        &runtime_env,
+        &launch_cwd,
+        &stderr_tail,
+        &preferred_config_values,
+    )
         .await?
         .on_spawn({
             let child_pid = Arc::clone(&child_pid);
@@ -6456,9 +6606,20 @@ async fn apply_preferred_session_options(
         return initial_config_options;
     }
 
+    let target_model = preferred_config_values
+        .get("model")
+        .and_then(|v| cursor_cli_model_id(v));
+
     let session_id = session.session_id().clone();
     let mut options = initial_config_options;
     for (config_id, value_id) in preferred_config_values {
+        if target_model
+            .as_deref()
+            .is_some_and(cursor_model_is_composer)
+            && is_cursor_effort_config_id(config_id)
+        {
+            continue;
+        }
         // Skip the round-trip when the agent's current value already matches.
         // Note: codex-acp advertises "mode" as a config option (so the match
         // check below normally fires), but we still do NOT skip when a
@@ -13227,6 +13388,197 @@ mod tests {
                 .and_then(|m| m.get("jetbrains"))
                 .is_none());
         }
+    }
+
+    #[test]
+    fn cursor_cli_model_id_strips_parameter_suffix() {
+        assert_eq!(
+            cursor_cli_model_id("composer-2.5[fast=true]").as_deref(),
+            Some("composer-2.5")
+        );
+        assert_eq!(
+            cursor_cli_model_id("  grok-4.6[effort=high,fast=true] ").as_deref(),
+            Some("grok-4.6")
+        );
+        assert_eq!(cursor_cli_model_id("composer-2.5").as_deref(), Some("composer-2.5"));
+        assert_eq!(cursor_cli_model_id("   ").as_deref(), None);
+    }
+
+    #[test]
+    fn cursor_launch_model_prefers_override_over_env() {
+        let env = BTreeMap::from([("CURSOR_MODEL".into(), "grok-4.6".into())]);
+        let preferred = BTreeMap::from([("model".into(), "composer-2.5".into())]);
+        assert_eq!(
+            cursor_launch_model_id(&env, &preferred).as_deref(),
+            Some("composer-2.5")
+        );
+        assert_eq!(
+            cursor_launch_model_id(&env, &BTreeMap::new()).as_deref(),
+            Some("cursor-grok-4.6-high")
+        );
+        assert_eq!(cursor_launch_model_id(&BTreeMap::new(), &BTreeMap::new()), None);
+    }
+
+    #[test]
+    fn cursor_launch_model_maps_acp_grok_family_to_cli_catalog_id() {
+        let env = BTreeMap::new();
+        let preferred = BTreeMap::from([
+            ("model".into(), "grok-4.6".into()),
+            ("effort".into(), "high".into()),
+            ("fast".into(), "false".into()),
+        ]);
+        assert_eq!(
+            cursor_launch_model_id(&env, &preferred).as_deref(),
+            Some("cursor-grok-4.6-high")
+        );
+        let fast = BTreeMap::from([
+            ("model".into(), "grok-4.6".into()),
+            ("effort".into(), "xhigh".into()),
+            ("fast".into(), "true".into()),
+        ]);
+        assert_eq!(
+            cursor_launch_model_id(&env, &fast).as_deref(),
+            Some("cursor-grok-4.6-xhigh-fast")
+        );
+        let already = BTreeMap::from([(
+            "CURSOR_MODEL".into(),
+            "cursor-grok-4.6-medium-fast".into(),
+        )]);
+        assert_eq!(
+            cursor_launch_model_id(&already, &BTreeMap::new()).as_deref(),
+            Some("cursor-grok-4.6-medium-fast")
+        );
+    }
+
+    #[test]
+    fn cursor_launch_model_appends_fast_for_composer() {
+        let env = BTreeMap::new();
+        let preferred = BTreeMap::from([
+            ("model".into(), "composer-2.5".into()),
+            ("fast".into(), "true".into()),
+        ]);
+        assert_eq!(
+            cursor_launch_model_id(&env, &preferred).as_deref(),
+            Some("composer-2.5-fast")
+        );
+    }
+
+    #[test]
+    fn inject_cursor_root_flags_pins_model_for_custom_cursor_backend() {
+        use crate::acp::custom_registry::{
+            hydrate, hydrate_test_guard, BinaryPlatformSpec, CustomAgentDef, CustomAgentSpec,
+            CustomDistributionKind,
+        };
+
+        let _guard = hydrate_test_guard();
+        let def = CustomAgentDef {
+            registry_id: "test-cursor-acp-launch".into(),
+            name: "Test Cursor ACP Launch".into(),
+            description: String::new(),
+            version: "1.0.0".into(),
+            distribution_kind: CustomDistributionKind::Binary,
+            spec: CustomAgentSpec {
+                binary: BTreeMap::from([(
+                    "windows-x86_64".into(),
+                    BinaryPlatformSpec {
+                        archive: "https://downloads.cursor.com/lab/2026.08.11-e8db854/windows/x64/agent-cli-package.zip"
+                            .into(),
+                        cmd: "./dist-package/cursor-agent.cmd".into(),
+                        args: vec!["acp".into()],
+                        ..Default::default()
+                    },
+                )]),
+                ..Default::default()
+            },
+            icon_url: None,
+            skills_shared_store: false,
+            skills_dir: None,
+            source: Default::default(),
+            version_probe: None,
+            supports_mcp: true,
+        };
+        hydrate(&[def]);
+
+        let mut args = vec!["acp".to_string()];
+        let preferred = BTreeMap::from([("model".into(), "composer-2.5".into())]);
+        inject_cursor_root_launch_flags(
+            &mut args,
+            AgentType::Custom("test-cursor-acp-launch"),
+            &BTreeMap::new(),
+            &preferred,
+        );
+        assert_eq!(args, vec!["--model".to_string(), "composer-2.5".to_string(), "acp".to_string()]);
+    }
+
+    #[test]
+    fn inject_cursor_root_flags_force_for_custom_cursor_backend() {
+        use crate::acp::custom_registry::{
+            hydrate, hydrate_test_guard, BinaryPlatformSpec, CustomAgentDef, CustomAgentSpec,
+            CustomDistributionKind,
+        };
+
+        let _guard = hydrate_test_guard();
+        let def = CustomAgentDef {
+            registry_id: "test-cursor-acp-force".into(),
+            name: "Test Cursor ACP Force".into(),
+            description: String::new(),
+            version: "1.0.0".into(),
+            distribution_kind: CustomDistributionKind::Binary,
+            spec: CustomAgentSpec {
+                binary: BTreeMap::from([(
+                    "windows-x86_64".into(),
+                    BinaryPlatformSpec {
+                        archive: "https://downloads.cursor.com/lab/2026.08.11-e8db854/windows/x64/agent-cli-package.zip"
+                            .into(),
+                        cmd: "./dist-package/cursor-agent.cmd".into(),
+                        args: vec!["acp".into()],
+                        ..Default::default()
+                    },
+                )]),
+                ..Default::default()
+            },
+            icon_url: None,
+            skills_shared_store: false,
+            skills_dir: None,
+            source: Default::default(),
+            version_probe: None,
+            supports_mcp: true,
+        };
+        hydrate(&[def]);
+
+        let mut args = vec!["acp".to_string()];
+        let env = BTreeMap::from([("CURSOR_FORCE".into(), "1".into())]);
+        inject_cursor_root_launch_flags(
+            &mut args,
+            AgentType::Custom("test-cursor-acp-force"),
+            &env,
+            &BTreeMap::new(),
+        );
+        assert_eq!(args, vec!["--force".to_string(), "acp".to_string()]);
+    }
+
+    #[test]
+    fn inject_cursor_root_flags_skips_non_cursor_backends() {
+        let mut args = vec!["acp".to_string()];
+        let preferred = BTreeMap::from([("model".into(), "composer-2.5".into())]);
+        inject_cursor_root_launch_flags(
+            &mut args,
+            AgentType::Codex,
+            &BTreeMap::new(),
+            &preferred,
+        );
+        assert_eq!(args, vec!["acp".to_string()]);
+    }
+
+    #[test]
+    fn composer_target_skips_effort_config_ids() {
+        assert!(cursor_model_is_composer("composer-2.5"));
+        assert!(cursor_model_is_composer("grok-composer-2.5-fast"));
+        assert!(!cursor_model_is_composer("grok-4.6"));
+        assert!(is_cursor_effort_config_id("effort"));
+        assert!(is_cursor_effort_config_id("reasoning_effort"));
+        assert!(!is_cursor_effort_config_id("fast"));
+        assert!(!is_cursor_effort_config_id("model"));
     }
 
     #[test]
