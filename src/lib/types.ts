@@ -3029,6 +3029,8 @@ export interface CursorSettings {
   permissions_allow: string[]
   /** permissions.deny rules. */
   permissions_deny: string[]
+  /** network.useHttp1ForAgent — HTTP/1.1 instead of HTTP/2 for agent transport. */
+  use_http1_for_agent: boolean | null
 }
 
 /** Structured-control values the Cursor settings panel sends on save. Null
@@ -3039,6 +3041,7 @@ export interface CursorStructuredConfig {
   sandboxMode?: string | null
   permissionsAllow?: string[] | null
   permissionsDeny?: string[] | null
+  useHttp1ForAgent?: boolean | null
 }
 
 /** Result of probing `cursor-agent status --format json` (auth card). */

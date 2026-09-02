@@ -40,6 +40,10 @@ import { getAgentLabel, isCustomAgentType } from "@/lib/custom-agents"
 import { describeAgentOptions } from "@/lib/api"
 import { useAcpAgents } from "@/hooks/use-acp-agents"
 import { toErrorMessage } from "@/lib/app-error"
+import {
+  effectiveModelConfigValue,
+  shouldShowConfigOptionForModel,
+} from "@/lib/cursor-model-options"
 
 // Sentinel `value` slot used by the top "Default" Select item in mode +
 // config-option rows. Picking it clears the override (sets it back to
@@ -312,6 +316,10 @@ function SnapshotEditor({
   // mode row — some agents (e.g. Codex) expose mode selection as one of the
   // config options too, and showing both produces a duplicate "Mode" entry.
   const showStandaloneMode = hasModes && !hasOptions
+  const effectiveModel = effectiveModelConfigValue(
+    snapshot.config_options,
+    overrideConfigValues
+  )
   return (
     <div className="space-y-4">
       {showStandaloneMode && snapshot.modes && (
@@ -323,15 +331,19 @@ function SnapshotEditor({
           disabled={disabled}
         />
       )}
-      {snapshot.config_options.map((option) => (
-        <ConfigOptionRow
-          key={option.id}
-          option={option}
-          overrideValue={overrideConfigValues[option.id] ?? null}
-          onChange={(valueId) => onConfigChange(option.id, valueId)}
-          disabled={disabled}
-        />
-      ))}
+      {snapshot.config_options
+        .filter((option) =>
+          shouldShowConfigOptionForModel(option, effectiveModel)
+        )
+        .map((option) => (
+          <ConfigOptionRow
+            key={option.id}
+            option={option}
+            overrideValue={overrideConfigValues[option.id] ?? null}
+            onChange={(valueId) => onConfigChange(option.id, valueId)}
+            disabled={disabled}
+          />
+        ))}
     </div>
   )
 }
