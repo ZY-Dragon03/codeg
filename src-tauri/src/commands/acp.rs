@@ -8547,7 +8547,22 @@ fn trim_non_empty(value: Option<String>) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 fn cursor_cli_config_path() -> PathBuf {
-    crate::parsers::cursor::resolve_cursor_config_dir().join("cli-config.json")
+    cursor_cli_config_path_for_env(&[])
+}
+
+fn cursor_cli_config_path_for_env(env: &[(String, String)]) -> PathBuf {
+    let lookup = |key: &str| {
+        env.iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+            .filter(|value| !value.trim().is_empty())
+    };
+    crate::parsers::cursor::resolve_cursor_config_from(
+        lookup("CURSOR_CONFIG_DIR").map(std::ffi::OsString::from),
+        lookup("XDG_CONFIG_HOME").map(std::ffi::OsString::from),
+        dirs::home_dir(),
+    )
+    .join("cli-config.json")
 }
 
 fn load_cursor_cli_config_raw() -> Option<String> {
@@ -8578,6 +8593,9 @@ pub(crate) fn parse_cursor_settings(raw: &str) -> crate::acp::types::CursorSetti
             .map(str::to_string),
         permissions_allow: string_list(v.pointer("/permissions/allow")),
         permissions_deny: string_list(v.pointer("/permissions/deny")),
+        use_http1_for_agent: v
+            .pointer("/network/useHttp1ForAgent")
+            .and_then(serde_json::Value::as_bool),
     }
 }
 
@@ -8638,6 +8656,17 @@ fn apply_cursor_structured_config(
     };
     set_rules("allow", &patch.permissions_allow);
     set_rules("deny", &patch.permissions_deny);
+    if let Some(use_http1) = patch.use_http1_for_agent {
+        let network = obj
+            .entry("network")
+            .or_insert_with(|| serde_json::json!({}));
+        if let Some(network_obj) = network.as_object_mut() {
+            network_obj.insert(
+                "useHttp1ForAgent".into(),
+                serde_json::Value::Bool(use_http1),
+            );
+        }
+    }
 
     serde_json::to_string_pretty(&root)
         .map_err(|e| AcpError::protocol(format!("serialize cursor cli-config failed: {e}")))
@@ -8646,6 +8675,10 @@ fn apply_cursor_structured_config(
 /// Validate + write cli-config.json (whole-document; the merge already
 /// preserved unmanaged keys).
 fn persist_cursor_cli_config(text: &str) -> Result<(), AcpError> {
+    persist_cursor_cli_config_at(&cursor_cli_config_path(), text)
+}
+
+fn persist_cursor_cli_config_at(path: &Path, text: &str) -> Result<(), AcpError> {
     let parsed = serde_json::from_str::<serde_json::Value>(text)
         .map_err(|e| AcpError::protocol(format!("invalid cursor cli-config.json: {e}")))?;
     if !parsed.is_object() {
@@ -8653,13 +8686,54 @@ fn persist_cursor_cli_config(text: &str) -> Result<(), AcpError> {
             "invalid cursor cli-config.json: root must be a JSON object",
         ));
     }
-    let path = cursor_cli_config_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| AcpError::protocol(format!("create cursor config dir failed: {e}")))?;
     }
-    fs::write(&path, format!("{text}\n"))
+    fs::write(path, format!("{text}\n"))
         .map_err(|e| AcpError::protocol(format!("write cursor cli-config failed: {e}")))
+}
+
+/// Cursor's agent transport defaults to HTTP/2 unless
+/// `network.useHttp1ForAgent` is true in cli-config.json. Codeg forces HTTP/1.1
+/// before every cursor-agent launch so ACP sessions match the user's network
+/// preference without relying on a manual `/config` edit.
+pub(crate) fn ensure_cursor_http1_for_launch(env: &[(String, String)]) {
+    let path = cursor_cli_config_path_for_env(env);
+    let base = fs::read_to_string(&path).unwrap_or_default();
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&base) {
+        if v.pointer("/network/useHttp1ForAgent")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        {
+            return;
+        }
+    }
+    let patch = crate::acp::types::CursorStructuredConfig {
+        use_http1_for_agent: Some(true),
+        ..Default::default()
+    };
+    let merged = match apply_cursor_structured_config(&base, &patch) {
+        Ok(merged) => merged,
+        Err(error) => {
+            tracing::warn!(
+                "[ACP][Cursor] failed to patch cli-config for HTTP/1.1 at {}: {error}",
+                path.display()
+            );
+            return;
+        }
+    };
+    if let Err(error) = persist_cursor_cli_config_at(&path, &merged) {
+        tracing::warn!(
+            "[ACP][Cursor] failed to write cli-config for HTTP/1.1 at {}: {error}",
+            path.display()
+        );
+    } else {
+        tracing::info!(
+            "[ACP][Cursor] set network.useHttp1ForAgent=true in {}",
+            path.display()
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -15606,6 +15680,7 @@ wire_api = "chat"
                 "  ".to_string(), // blank rows are dropped
             ]),
             permissions_deny: None, // untouched
+            use_http1_for_agent: None,
         };
         let merged = apply_cursor_structured_config(base, &patch).expect("merge");
         let v: serde_json::Value = serde_json::from_str(&merged).expect("valid json");
@@ -15625,6 +15700,40 @@ wire_api = "chat"
             Some(&serde_json::json!(["Shell(npm run build)"]))
         );
         assert_eq!(v.pointer("/permissions/deny"), Some(&serde_json::json!([])));
+    }
+
+    #[test]
+    fn cursor_structured_config_sets_use_http1_for_agent() {
+        let base = r#"{ "network": { "useHttp1ForAgent": false } }"#;
+        let patch = crate::acp::types::CursorStructuredConfig {
+            use_http1_for_agent: Some(true),
+            ..Default::default()
+        };
+        let merged = apply_cursor_structured_config(base, &patch).expect("merge");
+        let v: serde_json::Value = serde_json::from_str(&merged).expect("valid json");
+        assert_eq!(
+            v.pointer("/network/useHttp1ForAgent"),
+            Some(&serde_json::json!(true))
+        );
+    }
+
+    #[test]
+    fn ensure_cursor_http1_for_launch_writes_cli_config() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let env = [(
+            "CURSOR_CONFIG_DIR".to_string(),
+            dir.path().to_string_lossy().to_string(),
+        )];
+        ensure_cursor_http1_for_launch(&env);
+        let text = std::fs::read_to_string(dir.path().join("cli-config.json")).expect("written");
+        let v: serde_json::Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v.pointer("/network/useHttp1ForAgent"),
+            Some(&serde_json::json!(true))
+        );
+        ensure_cursor_http1_for_launch(&env);
+        let again = std::fs::read_to_string(dir.path().join("cli-config.json")).expect("still there");
+        assert_eq!(text, again, "second call is a no-op when already enabled");
     }
 
     #[tokio::test]

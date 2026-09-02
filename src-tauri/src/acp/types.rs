@@ -1134,6 +1134,9 @@ pub struct CursorSettings {
     pub permissions_allow: Vec<String>,
     /// `permissions.deny` rules.
     pub permissions_deny: Vec<String>,
+    /// `network.useHttp1ForAgent` — when true the CLI uses HTTP/1.1 for agent
+    /// transport instead of HTTP/2.
+    pub use_http1_for_agent: Option<bool>,
 }
 
 /// The structured-control values the Cursor settings panel sends on save.
@@ -1147,6 +1150,7 @@ pub struct CursorStructuredConfig {
     pub sandbox_mode: Option<String>,
     pub permissions_allow: Option<Vec<String>>,
     pub permissions_deny: Option<Vec<String>>,
+    pub use_http1_for_agent: Option<bool>,
 }
 
 /// Result of probing `cursor-agent status --format json` for the Cursor

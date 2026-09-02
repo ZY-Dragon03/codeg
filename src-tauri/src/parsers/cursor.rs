@@ -32,7 +32,7 @@ pub(crate) fn resolve_cursor_config_dir() -> PathBuf {
     )
 }
 
-fn resolve_cursor_config_from(
+pub(crate) fn resolve_cursor_config_from(
     config_env: Option<OsString>,
     xdg_env: Option<OsString>,
     home_dir: Option<PathBuf>,
