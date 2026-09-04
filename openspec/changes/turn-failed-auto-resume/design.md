@@ -17,3 +17,11 @@
 ## 默认模板关键词（可编辑）
 
 `RetriableError`, `TLS`, `connection reset`, `temporarily unavailable`, `Client network socket disconnected`
+
+## Phase 1B 契约
+
+模板是 event_rule 的可编辑数据，默认关闭；编辑/启停热加载，重启不覆盖用户修改。keywords 默认 ANY，可选 ALL；contains、regex、error_kind 是互斥 condition type。prompt 是纯文本 follow-up，不是 Initial Prompt。
+
+UI 的唯一交付归 event-automation-ui（Automations Event tab / Conversation 独立按钮），本 change 的验收必须包含它，不允许 deferred。scope 在服务端限制事件来源，不能以 target 冒充。
+
+现 reserve_attempt 先于 send，发送失败也可能消耗一次尝试；成功 end_turn 或距上次自动续跑30分钟重置连续失败计数。reviewer iteration/depth 不复用此 reset，链内重试继承 reviewer-controlled-handoff 的 chain guards。

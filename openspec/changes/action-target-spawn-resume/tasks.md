@@ -13,6 +13,15 @@
 
 ## 阶段三
 
-- [ ] 2.1 `execute_spawn_agent(AutomationConfig)`
+- [ ] 2.1 接入 event-automation-spawn-agent 唯一实现的 launch envelope + AutomationConfig 执行器，验证新 conversation receipt
 - [ ] 2.2 `parent_conversation`、`spawned_agent_conversation` 解析
-- [ ] 2.3 `max_chain_depth` 计数
+- [ ] 2.3 接入 reviewer-controlled-handoff 的 chain action authorization，验证 depth/iteration 拦截；不另建计数器
+
+## Phase 1B 差额（先于开放 existing selector）
+
+- [ ] 3.1 从目标 DB 行解析真实 folder/agent/身份并重检 deleted/busy/offline，验证跨 folder 发送不沿用源 folder。
+- [ ] 3.2 验证 source 与 specific 目标、scope 分离、无隐式 spawn；历史 [x] 不代表这些新增情况已验证。
+
+## Phase 3 原身份恢复
+
+- [ ] 4.1 复用 ACP resume 恢复既有 conversation，验证 external_id/agent_type/folder 一致；无法恢复时可见停止，无新 conversation。

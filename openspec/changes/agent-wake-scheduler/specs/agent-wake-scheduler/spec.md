@@ -42,3 +42,8 @@ Wake 触发时系统 MUST 仅向已有会话发送 follow-up，MUST NOT spawn �
 
 - **WHEN** 终端退出且存在匹配 Wake
 - **THEN** 系统 MUST 发布 `terminal_exited` 事件
+
+#### Scenario: 观察事件不重复唤醒
+
+- **WHEN** 同一个 Wake 已经消费并发布生命周期事件
+- **THEN** 系统 MUST NOT 因观察到该事件再次执行同一 Wake 的 send

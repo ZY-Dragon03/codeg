@@ -25,3 +25,7 @@
 - [x] 5.1 CRUD 后 `EventRulesEngine.reload_rules()` 热重载
 - [x] 5.2 `SessionFailure` + `AcpEvent::Error` 合并缓冲，在 `TurnComplete` 后单次执行
 - [x] 5.3 `conversation + turn_session_id + failure_record_id + fingerprint` 去重（30s TTL）
+
+## 产品边界
+
+上述 [x] 保留 9d685f36 的历史交付记录，本轮未重跑。scope/输入校验/稳定排序/preview/log UI 差额属于 event-automation-ui；成功事件 producer 属 event-automation-spawn-agent 1.4，review chain 关联消费属 reviewer-controlled-handoff。基础任务完成不能宣布 Phase 1 产品完成。

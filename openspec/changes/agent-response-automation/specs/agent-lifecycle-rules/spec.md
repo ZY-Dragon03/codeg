@@ -1,3 +1,5 @@
+> SUPERSEDED / 历史背景，非实施 authority（2026-09-05）。请使用 phase-1-event-automation 路线图及 event-automation-ui / reviewer-controlled-handoff / 其子 change。下列旧术语、任务和规范仅保留历史，不派工、不勾成已实现，也不把 lifecycle_rules 等模型作为第二套规则系统。
+
 ## Purpose
 
 让用户通过声明式规则，在智能体 turn 失败、正常结束、委派完成等事件上自动执行续跑、审计委派或后继任务，而无需人工盯屏或重复点击 Retry。

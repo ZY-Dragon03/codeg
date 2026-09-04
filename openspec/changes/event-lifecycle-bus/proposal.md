@@ -24,6 +24,8 @@
 
 ## Impact
 
-- `src-tauri/src/lifecycle/` 或 `orchestration/`
+- 实际实现位于 `src-tauri/src/event_rules/`，复用 ACP InternalEventBus
 - `acp/connection.rs`、`work_task/engine.rs` 发布点
-- DB：`event_rules` 表（或等价）
+- DB：已存在 `event_rule`、`event_rule_attempt`、`event_rule_log`
+
+本 change 的 1A 完成不等于 Phase 1 产品完成；event-automation-ui 负责 1B scope/校验/预览/日志接口和双入口。Phase 3 成功 turn producer 由 event-automation-spawn-agent 的 1.4 任务交付，可独立先于 spawn；reviewer-controlled-handoff 消费该事件，不另建 producer。

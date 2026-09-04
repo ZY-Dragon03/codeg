@@ -30,7 +30,7 @@
 
 ### Requirement: 规则匹配结果必须可观测
 
-系统 MUST 记录规则命中或未命中（至少 debug 日志，阶段一可不含 UI）。
+系统 MUST 记录规则命中或未命中；本基础 change 可先用 debug 日志，但完整 Phase 1 产品 MUST 通过 event-automation-ui 提供可读执行/guard 日志，不能以基础后端完成免除 UI。
 
 #### Scenario: 命中记录
 

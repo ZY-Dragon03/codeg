@@ -28,7 +28,24 @@
 
 系统 MUST 解析 `source_conversation`、`parent_conversation`、`specific_conversation`。
 
+系统 MUST 支持由特定 chain spawn receipt 绑定的 `spawned_agent_conversation`；existing target MUST 使用持久化 conversation 身份，不能以 Agent 类型或临时连接 id 代替。
+
 #### Scenario: parent_conversation
 
 - **WHEN** 事件来自委派子会话且 ref 为 `parent_conversation`
 - **THEN** 系统 MUST 向委派父会话发送 prompt
+
+#### Scenario: 指向既有跨 folder 会话
+
+- **WHEN** specific target 为另一个 folder 的现有 B
+- **THEN** 系统 MUST 使用 B 的身份和 folder 发送 follow-up，MUST NOT 使用源 folder 或重发 Initial Prompt
+
+#### Scenario: 目标不存在或不可恢复
+
+- **WHEN** 目标已删除或不能按原身份恢复
+- **THEN** 系统 MUST 可见失败并保留原 target，MUST NOT fallback spawn
+
+#### Scenario: spawn receipt 精确绑定
+
+- **WHEN** 使用 spawned_agent_conversation
+- **THEN** 系统 MUST 解析指定 chain action 的新会话 receipt，MUST NOT 选择最近打开的 agent

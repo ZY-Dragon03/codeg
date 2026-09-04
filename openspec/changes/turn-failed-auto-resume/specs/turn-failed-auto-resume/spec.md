@@ -33,7 +33,15 @@
 
 V1 规则 MUST 仅使用 contains、regex、error_kind 进行条件匹配。
 
+用户 MUST 能通过共享 Event Automation 编辑器编辑关键词、ANY/ALL、regex、error_kind、prompt、max_attempts、cooldown 和模板启停；该能力属于 Phase 1 验收。
+
 #### Scenario: 无 LLM 分类器
 
 - **WHEN** 用户配置 turn_failed 规则
 - **THEN** 系统 MUST NOT 调用 LLM 判断条件
+
+#### Scenario: 模板修改实际生效
+
+- **WHEN** 用户在 UI 将模板关键词改为 X、prompt 改为 Y 并启用
+- **THEN** 系统 MUST 按新条件发送 Y，重启 MUST 保留修改
+- **THEN** 系统 MUST NOT 继续使用硬编码 TLS 判断覆盖用户配置

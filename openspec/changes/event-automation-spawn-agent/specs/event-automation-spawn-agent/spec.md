@@ -19,6 +19,8 @@
 
 系统 MUST 使 `spawn_agent` 动作负载与现有 `AutomationConfig` 字段完全兼容。
 
+agent/folder/isolation 等启动目标信息 MUST 与快照分开表达；Existing Conversation MUST NOT 经过 spawn 动作。
+
 #### Scenario: 字段对齐
 
 - **WHEN** 规则保存 spawn 动作
@@ -33,3 +35,12 @@
 
 - **WHEN** 用户从 Automation A 导入到事件规则
 - **THEN** 规则 MUST 获得 A 的 config 副本
+
+### Requirement: 新 reviewer 与已有 reviewer 的启动不同
+
+系统 MUST 仅在选择 Start new Agent 时使用 Initial Prompt 快照；Existing reviewer MUST 只收到本轮 follow-up，不能隐式新建。
+
+#### Scenario: 复用 reviewer
+
+- **WHEN** Review target 为 Existing Conversation
+- **THEN** 系统 MUST 保持该 conversation 身份，并 MUST NOT 执行 spawn 或重发 Initial Prompt

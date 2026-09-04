@@ -11,7 +11,7 @@
   - action: `send_to_conversation` + `source_conversation` + prompt `继续`
   - guard: `max_attempts=3`, `cooldown_ms=5000`
 - 条件仅 v1：`contains`、`regex`、`error_kind`（无 LLM）
-- UI：规则编辑器 + 内置模板开关
+- UI：规则编辑器 + 内置模板开关，属于 Phase 1B 必需；唯一实现归 event-automation-ui，不能因后端完成而延后
 - 依赖：`event-lifecycle-bus` + `action-target-spawn-resume`
 
 ## Capabilities
@@ -27,4 +27,4 @@
 ## Impact
 
 - 内置模板 seed migration
-- 设置页「事件规则」首屏场景
+- Automations 的 Event 页签和 Conversation header 独立按钮共用同一规则编辑器

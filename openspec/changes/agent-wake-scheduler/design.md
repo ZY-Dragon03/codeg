@@ -13,7 +13,7 @@
 - **归属**：Wake 绑定创建它的 `conversation_id` + `connection_id`（若仍存活）
 - **terminal 匹配**：优先 `terminal_id`；无 id 时按会话最近活跃终端（易错，文档警告）
 - **timer**：服务端 `tokio` + DB 持久化 next_fire；启动时 reload pending
-- **执行**：Wake 触发 → 构造 LifecycleEvent → 可 bypass 规则直接执行 send，或生成隐式规则（倾向直接 send 减复杂度）
+- **执行**：Wake 触发生成确定的 wake action，走共享 send_to_conversation 执行器及日志/目标验证；不创建第二套 Event Rule。发布 lifecycle 供观察时不得再从同一 Wake 重复派发。
 
 ## Risks
 
@@ -23,3 +23,5 @@
 ## Migration Plan
 
 阶段二在 turn-failed 之后；发布 `terminal_exited` / `timer_fired` 事件
+
+先完成 Phase 1B 用户可配置产品再按价值交付 Wake。Wake 是 terminal/timer producer 的依赖，**不是 reviewer-controlled-handoff 的硬依赖**；reviewer 只需 settled-success producer、稳定目标和决策/chain 状态。Wake 绑定的持久化身份以 conversation_id 为准，connection_id 仅运行时句柄。

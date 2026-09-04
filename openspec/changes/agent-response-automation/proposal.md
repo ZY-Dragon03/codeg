@@ -1,3 +1,5 @@
+> SUPERSEDED / 历史背景，非实施 authority（2026-09-05）。请使用 phase-1-event-automation 路线图及 event-automation-ui / reviewer-controlled-handoff / 其子 change。下列旧术语、任务和规范仅保留历史，不派工、不勾成已实现，也不把 lifecycle_rules 等模型作为第二套规则系统。
+
 # 智能体响应事件驱动自动化（规则链 / 后继编排）
 
 > **状态：已由 Phase 1 拆分取代。** 见 `phase-1-event-automation` 及子 change：
