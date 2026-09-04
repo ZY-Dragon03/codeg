@@ -846,6 +846,10 @@ pub(crate) async fn do_start_web_server_tauri(
             .state::<crate::acp::chat_authoring::ChatAuthoringRuntimeConfig>()
             .inner()
             .clone(),
+        event_rules_engine: app
+            .state::<crate::event_rules::EventRulesEngineHandle>()
+            .inner()
+            .clone(),
         system_op_lock: crate::app_state::default_system_op_lock(),
         // Reuse the same handle the desktop `app_update` commands write to so
         // HTTP and webview readers see the identical update snapshot.

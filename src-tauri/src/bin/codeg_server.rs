@@ -270,6 +270,7 @@ async fn async_main() -> ExitCode {
         db.conn.clone(),
         data_dir.clone(),
     );
+    let event_rules_handle = codeg_lib::event_rules::EventRulesEngineHandle::new();
     let state = Arc::new(AppState {
         db,
         connection_manager,
@@ -291,6 +292,7 @@ async fn async_main() -> ExitCode {
         question_config: question_config.clone(),
         session_info_config: session_info_config.clone(),
         chat_authoring_config: chat_authoring_config.clone(),
+        event_rules_engine: event_rules_handle.clone(),
         system_op_lock: codeg_lib::app_state::default_system_op_lock(),
         update_state: codeg_lib::app_state::default_update_state(),
     });
@@ -508,6 +510,21 @@ async fn async_main() -> ExitCode {
     ) {
         tokio::spawn(codeg_lib::work_task::run_task_engine(engine));
     }
+
+    let event_rules_engine = std::sync::Arc::new(codeg_lib::event_rules::EventRulesEngine::new(
+        codeg_lib::db::AppDatabase {
+            conn: state.db.conn.clone(),
+        },
+        state.connection_manager.clone_ref(),
+        state.acp_event_bus.clone(),
+    ));
+    event_rules_handle.set(event_rules_engine.clone());
+    tokio::spawn({
+        let engine = event_rules_engine.clone();
+        async move {
+            engine.run().await;
+        }
+    });
 
     // Label worktree folders registered before aliases were seeded at creation
     // with the branch they have checked out (mirrors lib.rs setup). Background;

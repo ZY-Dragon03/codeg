@@ -3,6 +3,7 @@ pub mod automation;
 pub mod background;
 pub mod chat_channel;
 pub mod conversation;
+pub mod event_rule;
 pub mod folder;
 pub mod message;
 pub mod model_provider;
@@ -26,6 +27,7 @@ pub use conversation::{
     ImportFolderOutcome, ImportResult, ImportSelectedResult, ScanFolder, ScanResult, ScanSession,
     ScanSessionStatus, SelectedSessionKey, SessionStats, SidebarData,
 };
+pub use event_rule::{EventRuleDraft, EventRuleInfo};
 pub use folder::{
     FolderCommandInfo, FolderDetail, FolderHistoryEntry, OpenedTab, OpenedTabsSnapshot,
     SaveTabsOutcome,

@@ -20,6 +20,7 @@ pub mod backgrounds;
 pub mod chat_channel;
 pub mod commands;
 pub mod db;
+pub mod event_rules;
 pub mod folder_links;
 pub mod forge;
 pub mod git_credential;
@@ -67,7 +68,7 @@ mod tauri_app {
         chat_authoring as chat_authoring_commands, chat_channel as chat_channel_commands,
         conversations,
         custom_skills as custom_skills_commands, delegation as delegation_commands,
-        experts as experts_commands, feedback as feedback_commands, file_io, folder_commands,
+        event_rule as event_rule_commands, experts as experts_commands, feedback as feedback_commands, file_io, folder_commands,
         folder_links, office_tools as office_tools_commands, open_in,
         folders, logging as logging_commands, mcp as mcp_commands,
         model_provider as model_provider_commands, notification, pet as pet_commands, project_boot,
@@ -813,6 +814,26 @@ mod tauri_app {
                     tauri::async_runtime::spawn(crate::work_task::run_task_engine(engine));
                 }
 
+                let event_rules_handle = crate::event_rules::EventRulesEngineHandle::new();
+                app.manage(event_rules_handle.clone());
+
+                let event_rules_engine = std::sync::Arc::new(crate::event_rules::EventRulesEngine::new(
+                    crate::db::AppDatabase {
+                        conn: app.state::<crate::db::AppDatabase>().conn.clone(),
+                    },
+                    app.state::<ConnectionManager>().clone_ref(),
+                    app.state::<std::sync::Arc<crate::acp::InternalEventBus>>()
+                        .inner()
+                        .clone(),
+                ));
+                event_rules_handle.set(event_rules_engine.clone());
+                tauri::async_runtime::spawn({
+                    let engine = event_rules_engine.clone();
+                    async move {
+                        engine.run().await;
+                    }
+                });
+
                 // Single-window workspace: ensure the main window exists.
                 // Workspace state (open folders, opened tabs, active tab) is
                 // restored by the frontend via `list_open_folder_details` /
@@ -1369,6 +1390,12 @@ mod tauri_app {
                 automation_commands::automation_compute_next_run,
                 automation_commands::automation_run_now,
                 automation_commands::automation_cancel_run,
+                event_rule_commands::event_rule_list,
+                event_rule_commands::event_rule_get,
+                event_rule_commands::event_rule_create,
+                event_rule_commands::event_rule_update,
+                event_rule_commands::event_rule_set_enabled,
+                event_rule_commands::event_rule_delete,
                 token_usage_commands::token_usage_report,
                 token_usage_commands::token_usage_facets,
                 token_usage_commands::token_usage_status,

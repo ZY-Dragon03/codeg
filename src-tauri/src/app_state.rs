@@ -9,6 +9,7 @@ use crate::chat_channel::manager::ChatChannelManager;
 use crate::db::AppDatabase;
 use crate::pet_state_mapper::PetStateHandle;
 use crate::terminal::manager::TerminalManager;
+use crate::event_rules::EventRulesEngineHandle;
 use crate::web::event_bridge::{EventEmitter, WebEventBroadcaster};
 use crate::web::WebServerState;
 use crate::workspace_transfer::WorkspaceTransferManager;
@@ -65,6 +66,8 @@ pub struct AppState {
     /// updated by the chat-authoring settings command on save. Populated at
     /// startup by `apply_persisted_chat_authoring_config`.
     pub chat_authoring_config: crate::acp::chat_authoring::ChatAuthoringRuntimeConfig,
+    /// Hot-reload target for lifecycle event rules (CRUD → `reload_rules`).
+    pub event_rules_engine: EventRulesEngineHandle,
     /// Serializes mutually-exclusive system operations — in-place
     /// self-update, restart, rollback — so a second click can't race a
     /// download/swap already in flight. Handlers `try_lock` and reject when
@@ -245,6 +248,7 @@ impl AppState {
             question_config,
             session_info_config,
             chat_authoring_config,
+            event_rules_engine: EventRulesEngineHandle::new(),
             system_op_lock: default_system_op_lock(),
             update_state: default_update_state(),
         }

@@ -1273,6 +1273,28 @@ pub fn build_router(
             "/automation_cancel_run",
             post(handlers::automation::automation_cancel_run),
         )
+        // ─── Event rules (lifecycle automation) ───
+        .route(
+            "/event_rule_list",
+            post(handlers::event_rule::event_rule_list),
+        )
+        .route("/event_rule_get", post(handlers::event_rule::event_rule_get))
+        .route(
+            "/event_rule_create",
+            post(handlers::event_rule::event_rule_create),
+        )
+        .route(
+            "/event_rule_update",
+            post(handlers::event_rule::event_rule_update),
+        )
+        .route(
+            "/event_rule_set_enabled",
+            post(handlers::event_rule::event_rule_set_enabled),
+        )
+        .route(
+            "/event_rule_delete",
+            post(handlers::event_rule::event_rule_delete),
+        )
         // ─── Token usage dashboard ───
         .route(
             "/token_usage_report",
