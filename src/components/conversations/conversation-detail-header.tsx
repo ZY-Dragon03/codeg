@@ -115,6 +115,7 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
   const tConv = useTranslations("Folder.conversation")
   const tStatus = useTranslations("Folder.statusLabels")
   const tDetails = useTranslations("Folder.sessionDetails")
+  const tEvent = useTranslations("EventAutomations")
   const { closeTab, openNewConversationTab } = useTabActions()
   const updateConversationLocal = useAppWorkspaceStore(
     (s) => s.updateConversationLocal
@@ -282,19 +283,25 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
                 className="mr-1 h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
                 title={
                   persisted
-                    ? "Event Automation"
-                    : "Send a message first to persist this conversation."
+                    ? tEvent("header.tooltip")
+                    : tEvent("header.disabledTooltip")
                 }
-                onClick={() => setEventAutomationsOpen(true)}
+                aria-label={tEvent("header.button")}
+                disabled={!persisted}
+                onClick={() => {
+                  if (persisted) setEventAutomationsOpen(true)
+                }}
               >
                 <Zap className="size-3.5" aria-hidden />
-                <span className="hidden sm:inline">Event Automation</span>
+                <span className="hidden sm:inline">
+                  {tEvent("header.button")}
+                </span>
               </Button>
             </TooltipTrigger>
             <TooltipContent>
               {persisted
-                ? "Manage Event Automation"
-                : "Send a message first to persist this conversation."}
+                ? tEvent("header.tooltip")
+                : tEvent("header.disabledTooltip")}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -374,7 +381,7 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
       >
         <DialogContent className="max-w-5xl">
           <DialogHeader>
-            <DialogTitle>Event Automation</DialogTitle>
+            <DialogTitle>{tEvent("header.dialogTitle")}</DialogTitle>
           </DialogHeader>
           <EventAutomationsPanel
             conversationId={conversationId}

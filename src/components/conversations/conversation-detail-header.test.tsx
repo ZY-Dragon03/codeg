@@ -139,4 +139,20 @@ describe("ConversationDetailHeader dialog target snapshot", () => {
     })
     expect(h.updateConversationTitle).not.toHaveBeenCalledWith(2, "renamed")
   })
+
+  it("disables event automation for an unsaved conversation", () => {
+    const { getByRole, queryByRole } = render(
+      withIntl(
+        <ConversationDetailHeader
+          {...A}
+          conversationId={null}
+          runtimeConversationId={99}
+        />
+      )
+    )
+
+    const button = getByRole("button", { name: "Automation" })
+    expect(button).toBeDisabled()
+    expect(queryByRole("dialog")).not.toBeInTheDocument()
+  })
 })

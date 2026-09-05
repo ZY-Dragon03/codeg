@@ -1,7 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Pencil, Plus, Trash2 } from "lucide-react"
+import { Pencil, Plus, Trash2, ChevronDown } from "lucide-react"
+import { useTranslations } from "next-intl"
 import {
   eventRuleCreate,
   eventRuleDelete,
@@ -13,11 +14,30 @@ import {
 } from "@/lib/api"
 import { onTransportReconnect } from "@/lib/platform"
 import { toErrorMessage } from "@/lib/app-error"
-import type { EventRule, EventRuleDraft, EventRuleLog } from "@/lib/types"
+import { getAgentLabel } from "@/lib/custom-agents"
+import {
+  ALL_AGENT_TYPES,
+  type AgentType,
+  type EventRule,
+  type EventRuleDraft,
+  type EventRuleLog,
+} from "@/lib/types"
+import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { Button } from "@/components/ui/button"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Switch } from "@/components/ui/switch"
+import type { FolderSelectOption } from "@/components/shared/folder-select"
 import { EventRuleEditor } from "./event-rule-editor"
+
+type Translator = (
+  key: string,
+  values?: Record<string, string | number>
+) => string
 
 function isApplicable(
   rule: EventRule,
@@ -36,19 +56,109 @@ function isApplicable(
   if (scope.kind === "folder") return scope.folder_id === folderId
   return scope.agent_type === agentType
 }
-function scopeLabel(rule: EventRule, inherited = false) {
+
+function conversationLabel(
+  id: number,
+  conversations: Awaited<ReturnType<typeof listAllConversations>>,
+  t: Translator
+) {
+  return (
+    conversations.find((conversation) => conversation.id === id)?.title ||
+    t("editor.selectConversation")
+  )
+}
+
+function scopeLabel(
+  rule: EventRule,
+  inherited: boolean,
+  conversations: Awaited<ReturnType<typeof listAllConversations>>,
+  folders: readonly FolderSelectOption[],
+  t: Translator
+) {
   const scope = rule.config.scope
-  if (scope.kind === "global")
-    return inherited ? "Global (inherited)" : "Global"
-  if (scope.kind === "conversation")
-    return `Conversation #${scope.conversation_id}`
-  if (scope.kind === "folder")
-    return inherited
-      ? `Folder #${scope.folder_id} (inherited)`
-      : `Folder #${scope.folder_id}`
-  return inherited
-    ? `Agent ${scope.agent_type} (inherited)`
-    : `Agent ${scope.agent_type}`
+  let label: string
+  if (scope.kind === "global") label = t("scopeGlobal")
+  else if (scope.kind === "conversation") {
+    label =
+      scope.conversation_id > 0
+        ? conversationLabel(scope.conversation_id, conversations, t)
+        : t("scopeConversation")
+  } else if (scope.kind === "folder") {
+    label =
+      folders.find((folder) => folder.id === scope.folder_id)?.alias ||
+      folders.find((folder) => folder.id === scope.folder_id)?.name ||
+      t("editor.folderPlaceholder")
+  } else {
+    label = getAgentLabel(scope.agent_type)
+  }
+  if (!inherited) return label
+  return t("inherited") + ": " + label
+}
+
+function conditionLabel(rule: EventRule, t: Translator) {
+  const condition = rule.config.condition
+  if (condition.kind === "contains") {
+    return condition.match_mode === "all"
+      ? t("conditionAll")
+      : t("conditionAny")
+  }
+  if (condition.kind === "regex") return t("conditionRegex")
+  if (condition.kind === "error_kind") return t("conditionErrorKind")
+  return t("conditionNone")
+}
+
+function logStatusLabel(status: EventRuleLog["status"], t: Translator) {
+  if (status === "fired") return t("logs.fired")
+  if (status === "failed") return t("logs.failed")
+  return t("logs.skipped")
+}
+
+function numberAfter(text: string, token: string) {
+  const match = text.match(new RegExp(token + "\\s*[=:]\\s*(\\d+)", "i"))
+  return match?.[1] ?? "?"
+}
+
+export function logReasonLabel(log: EventRuleLog, t: Translator) {
+  const raw = [log.guard_reason, log.detail, log.action]
+    .filter(Boolean)
+    .join(" ")
+  if (/max[_ ]attempts?/i.test(raw)) {
+    return t("logs.reasonMaxAttempts", {
+      count: numberAfter(raw, "max[_ ]attempts?"),
+    })
+  }
+  if (/cooldown/i.test(raw)) {
+    const milliseconds = Number(numberAfter(raw, "cooldown[_ ]?ms"))
+    return t("logs.reasonCooldown", {
+      seconds:
+        Number.isFinite(milliseconds) && milliseconds > 0
+          ? Math.round(milliseconds / 1000)
+          : numberAfter(raw, "cooldown"),
+    })
+  }
+  if (
+    /no live connection|offline|unavailable|no connected idle runtime/i.test(
+      raw
+    )
+  ) {
+    return t("logs.reasonUnavailable")
+  }
+  return t("logs.reasonGeneric", {
+    reason: t("logs.reasonUnavailable"),
+  })
+}
+
+function isInheritedScope(
+  rule: EventRule,
+  conversationId: number | null,
+  folderId: number | null,
+  agentType: string | null
+) {
+  const kind = rule.config.scope.kind
+  if (conversationId != null) return kind !== "conversation"
+  if (folderId != null) return kind === "global" || kind === "agent_type"
+  if (agentType != null) return kind === "global"
+  return false
 }
 
 export function EventAutomationsPanel({
@@ -62,6 +172,9 @@ export function EventAutomationsPanel({
   agentType?: string | null
   dialog?: boolean
 }) {
+  const t = useTranslations("EventAutomations")
+  const translate = t as unknown as Translator
+  const allFolders = useAppWorkspaceStore((state) => state.allFolders)
   const [rules, setRules] = useState<EventRule[]>([])
   const [conversations, setConversations] = useState<
     Awaited<ReturnType<typeof listAllConversations>>
@@ -72,6 +185,23 @@ export function EventAutomationsPanel({
   const [nextCursor, setNextCursor] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const request = useRef(0)
+
+  const folderOptions = useMemo<FolderSelectOption[]>(
+    () =>
+      allFolders.map((folder) => ({
+        id: folder.id,
+        name: folder.name,
+        alias: folder.alias,
+        path: folder.path,
+      })),
+    [allFolders]
+  )
+  const agentTypes = useMemo<AgentType[]>(() => {
+    const values = new Set<AgentType>(ALL_AGENT_TYPES)
+    conversations.forEach((conversation) => values.add(conversation.agent_type))
+    if (agentType) values.add(agentType)
+    return [...values]
+  }, [agentType, conversations])
 
   const load = useCallback(async () => {
     const id = ++request.current
@@ -90,9 +220,8 @@ export function EventAutomationsPanel({
       if (id === request.current) setError(toErrorMessage(cause))
     }
   }, [])
+
   useEffect(() => {
-    // Queue the initial request after commit. Besides keeping render pure, this
-    // gives a dialog opening during a tab switch a stable mounted target.
     const initialLoad = window.setTimeout(() => void load(), 0)
     const focus = () => void load()
     window.addEventListener("focus", focus)
@@ -103,6 +232,7 @@ export function EventAutomationsPanel({
       offReconnect?.()
     }
   }, [load])
+
   const loadLogs = useCallback(
     async (ruleId: number, cursor: number | null = null) => {
       const page = await eventRuleListLogs({
@@ -116,6 +246,7 @@ export function EventAutomationsPanel({
     },
     [conversationId]
   )
+
   useEffect(() => {
     const initialLogs = window.setTimeout(() => {
       if (selected) void loadLogs(selected.id)
@@ -123,6 +254,7 @@ export function EventAutomationsPanel({
     }, 0)
     return () => window.clearTimeout(initialLogs)
   }, [selected, loadLogs])
+
   const visibleRules = useMemo(
     () =>
       rules.filter((rule) =>
@@ -130,8 +262,12 @@ export function EventAutomationsPanel({
       ),
     [rules, conversationId, folderId, agentType]
   )
-  const contextual =
-    conversationId != null || folderId != null || agentType != null
+  const initialScope =
+    conversationId == null
+      ? ({ kind: "global" } as const)
+      : ({ kind: "conversation", conversation_id: conversationId } as const)
+  const cannotCreate = dialog && conversationId == null
+
   const save = async (draft: EventRuleDraft) => {
     setError(null)
     try {
@@ -158,7 +294,7 @@ export function EventAutomationsPanel({
     }
   }
   const remove = async (rule: EventRule) => {
-    if (!window.confirm(`Delete ${rule.name}?`)) return
+    if (!window.confirm(t("deleteConfirm", { rule: rule.name }))) return
     try {
       await eventRuleDelete(rule.id)
       if (selected?.id === rule.id) setSelected(null)
@@ -167,39 +303,26 @@ export function EventAutomationsPanel({
       setError(toErrorMessage(cause))
     }
   }
-  const initialScope =
-    conversationId == null
-      ? { kind: "global" as const }
-      : { kind: "conversation" as const, conversation_id: conversationId }
-  const cannotCreate = dialog && conversationId == null
+
   return (
     <div
       className="flex min-h-0 flex-col gap-4"
       data-testid="event-automations-panel"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="text-lg font-semibold">Event Automations</h2>
-          <p className="text-sm text-muted-foreground">
-            Only turn_failed is available in Phase 1.
-          </p>
+      {!dialog ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-lg font-semibold">{t("title")}</h2>
+            <p className="text-sm text-muted-foreground">{t("description")}</p>
+          </div>
+          <Button size="sm" onClick={() => setEditing("new")}>
+            <Plus className="size-4" /> {t("newRule")}
+          </Button>
         </div>
-        <Button
-          size="sm"
-          disabled={cannotCreate}
-          title={
-            cannotCreate
-              ? "Send a message first to persist this conversation."
-              : undefined
-          }
-          onClick={() => setEditing("new")}
-        >
-          <Plus className="size-4" /> New event rule
-        </Button>
-      </div>
+      ) : null}
       {cannotCreate ? (
         <p className="rounded-xl bg-muted px-3 py-2 text-sm text-muted-foreground">
-          Save this conversation before creating a conversation-scoped rule.
+          {t("header.disabledTooltip")}
         </p>
       ) : null}
       {error ? (
@@ -216,12 +339,14 @@ export function EventAutomationsPanel({
             <EventRuleEditor
               key={
                 editing === "new"
-                  ? `new-${conversationId ?? "global"}`
-                  : `edit-${editing.id}`
+                  ? "new-" + (conversationId ?? "global")
+                  : "edit-" + editing.id
               }
               rule={editing === "new" ? null : editing}
               initialScope={editing === "new" ? initialScope : undefined}
               conversations={conversations}
+              folders={folderOptions}
+              agentTypes={agentTypes}
               onSubmit={save}
               onCancel={() => setEditing(null)}
             />
@@ -232,65 +357,121 @@ export function EventAutomationsPanel({
           <ScrollArea className={dialog ? "max-h-[55dvh]" : "min-h-0"}>
             <ul className="flex flex-col gap-2 pr-3">
               {visibleRules.length ? (
-                visibleRules.map((rule) => (
-                  <li
-                    key={rule.id}
-                    className={`rounded-xl border p-3 ${selected?.id === rule.id ? "border-primary" : ""}`}
-                  >
-                    <button
-                      className="w-full text-left"
-                      onClick={() => setSelected(rule)}
+                visibleRules.map((rule) => {
+                  const inherited = isInheritedScope(
+                    rule,
+                    conversationId,
+                    folderId,
+                    agentType
+                  )
+                  const displayName =
+                    rule.builtin_key === "retriable_error_auto_resume"
+                      ? t("builtin.name")
+                      : rule.name
+                  return (
+                    <li
+                      key={rule.id}
+                      className={
+                        "rounded-xl border p-3 " +
+                        (selected?.id === rule.id ? "border-primary" : "")
+                      }
                     >
-                      <div className="flex justify-between gap-2">
-                        <span className="font-medium">{rule.name}</span>
-                        <span className="text-xs text-muted-foreground">
-                          priority {rule.priority}
-                        </span>
+                      <button
+                        className="w-full text-left"
+                        onClick={() => setSelected(rule)}
+                      >
+                        <div className="flex justify-between gap-2">
+                          <span className="font-medium">{displayName}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {rule.enabled
+                              ? t("status.enabled")
+                              : t("status.disabled")}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {scopeLabel(
+                            rule,
+                            inherited,
+                            conversations,
+                            folderOptions,
+                            translate
+                          )}{" "}
+                          · {conditionLabel(rule, translate)}
+                        </p>
+                        {rule.builtin_key === "retriable_error_auto_resume" ? (
+                          <span className="mt-2 inline-flex rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                            {t("builtin.badge")}
+                          </span>
+                        ) : null}
+                      </button>
+                      <div className="mt-3 flex items-center justify-between">
+                        <label className="flex items-center gap-2 text-xs">
+                          {rule.enabled
+                            ? t("status.enabled")
+                            : t("status.disabled")}
+                          <Switch
+                            checked={rule.enabled}
+                            onCheckedChange={() => void toggle(rule)}
+                            aria-label={
+                              rule.enabled
+                                ? t("status.enabled")
+                                : t("status.disabled")
+                            }
+                          />
+                        </label>
+                        <div className="flex gap-1">
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            aria-label={t("edit") + " " + displayName}
+                            onClick={() => setEditing(rule)}
+                          >
+                            <Pencil className="size-4" />
+                          </Button>
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            aria-label={t("delete") + " " + displayName}
+                            onClick={() => void remove(rule)}
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </div>
                       </div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {scopeLabel(rule, contextual)} ·{" "}
-                        {rule.config.condition.kind}
-                      </p>
-                    </button>
-                    <div className="mt-3 flex items-center justify-between">
-                      <label className="flex items-center gap-2 text-xs">
-                        {rule.enabled ? "Enabled" : "Disabled"}
-                        <Switch
-                          checked={rule.enabled}
-                          onCheckedChange={() => void toggle(rule)}
-                        />
-                      </label>
-                      <div className="flex gap-1">
-                        <Button
-                          size="icon-sm"
-                          variant="ghost"
-                          aria-label={`Edit ${rule.name}`}
-                          onClick={() => setEditing(rule)}
-                        >
-                          <Pencil className="size-4" />
-                        </Button>
-                        <Button
-                          size="icon-sm"
-                          variant="ghost"
-                          aria-label={`Delete ${rule.name}`}
-                          onClick={() => void remove(rule)}
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </li>
-                ))
+                    </li>
+                  )
+                })
               ) : (
                 <li className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">
-                  No event rules yet.
+                  {t("empty")}
                 </li>
               )}
             </ul>
           </ScrollArea>
           <RuleDetail
             rule={selected}
-            contextual={contextual}
+            scopeText={
+              selected
+                ? scopeLabel(
+                    selected,
+                    isInheritedScope(
+                      selected,
+                      conversationId,
+                      folderId,
+                      agentType
+                    ),
+                    conversations,
+                    folderOptions,
+                    translate
+                  )
+                : ""
+            }
+            displayName={
+              selected?.builtin_key === "retriable_error_auto_resume"
+                ? t("builtin.name")
+                : (selected?.name ?? "")
+            }
+            conversations={conversations}
             logs={logs}
             nextCursor={nextCursor}
             loadMore={() =>
@@ -308,23 +489,31 @@ export function EventAutomationsPanel({
 
 function RuleDetail({
   rule,
-  contextual,
+  scopeText,
+  displayName,
+  conversations,
   logs,
   nextCursor,
   loadMore,
   onEdit,
 }: {
   rule: EventRule | null
-  contextual: boolean
+  scopeText: string
+  displayName: string
+  conversations: Awaited<ReturnType<typeof listAllConversations>>
   logs: EventRuleLog[]
   nextCursor: number | null
   loadMore: () => void
   onEdit: () => void
 }) {
+  const t = useTranslations("EventAutomations")
+  const translate = t as unknown as Translator
+  const [technicalLog, setTechnicalLog] = useState<number | null>(null)
+  const locale = typeof navigator === "undefined" ? "en" : navigator.language
   if (!rule)
     return (
       <div className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">
-        Select a rule to see its configuration and execution logs.
+        {t("selectRule")}
       </div>
     )
   return (
@@ -333,52 +522,111 @@ function RuleDetail({
         <div className="rounded-xl border p-4">
           <div className="flex items-start justify-between gap-2">
             <div>
-              <h3 className="font-semibold">{rule.name}</h3>
+              <h3 className="font-semibold">{displayName}</h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                {scopeLabel(rule, contextual)} · priority {rule.priority} ·{" "}
-                {rule.enabled ? "enabled" : "disabled"}
+                {scopeText} ·{" "}
+                {rule.enabled ? t("status.enabled") : t("status.disabled")}
               </p>
+              {rule.builtin_key === "retriable_error_auto_resume" ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {t("builtin.description")}
+                </p>
+              ) : null}
             </div>
             <Button size="sm" variant="outline" onClick={onEdit}>
-              Edit
+              {t("edit")}
             </Button>
           </div>
           <p className="mt-3 whitespace-pre-wrap text-sm">
             {rule.config.action.prompt}
           </p>
-          <p className="mt-2 text-xs text-muted-foreground">
-            First matching rule wins. Guard blocks do not fall through to later
-            rules.
-          </p>
         </div>
         <div className="rounded-xl border p-4">
-          <h3 className="font-semibold">Execution logs</h3>
+          <h3 className="font-semibold">{t("logs.title")}</h3>
           {logs.length ? (
             <ul className="mt-3 flex flex-col gap-3">
-              {logs.map((log) => (
-                <li key={log.id} className="border-l-2 pl-3 text-sm">
-                  <div className="flex flex-wrap gap-x-2">
-                    <span className="font-medium">{log.status}</span>
-                    <span className="text-muted-foreground">
-                      {new Date(log.created_at).toLocaleString()}
-                    </span>
-                  </div>
-                  <p className="text-muted-foreground">
-                    source #{log.source_conversation_id} →{" "}
-                    {log.resolved_target_id == null
-                      ? "unavailable"
-                      : `#${log.resolved_target_id}`}{" "}
-                    · {log.guard_reason ?? log.action ?? "unavailable"}
-                  </p>
-                  <p className="whitespace-pre-wrap text-xs text-muted-foreground">
-                    {log.prompt_snapshot ?? log.detail ?? "unavailable"}
-                  </p>
-                </li>
-              ))}
+              {logs.map((log) => {
+                const source = conversationLabel(
+                  log.source_conversation_id,
+                  conversations,
+                  translate
+                )
+                const target =
+                  log.resolved_target_id == null
+                    ? t("logs.reasonUnavailable")
+                    : conversationLabel(
+                        log.resolved_target_id,
+                        conversations,
+                        translate
+                      )
+                return (
+                  <li key={log.id} className="border-l-2 pl-3 text-sm">
+                    <div className="flex flex-wrap gap-x-2">
+                      <span className="font-medium">
+                        {logStatusLabel(log.status, translate)}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {new Intl.DateTimeFormat(locale, {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        }).format(new Date(log.created_at))}
+                      </span>
+                    </div>
+                    <p className="text-muted-foreground">
+                      {t("logs.source", { reason: source })}
+                    </p>
+                    <p className="text-muted-foreground">
+                      {t("logs.target", { target })}
+                    </p>
+                    <p className="text-sm">
+                      {log.prompt_snapshot ?? logReasonLabel(log, translate)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {logReasonLabel(log, translate)}
+                    </p>
+                    <Collapsible
+                      open={technicalLog === log.id}
+                      onOpenChange={(open) =>
+                        setTechnicalLog(open ? log.id : null)
+                      }
+                    >
+                      <CollapsibleTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="mt-1 px-0 text-xs"
+                        >
+                          {t("logs.technical", {
+                            reason: t("logs.reasonUnavailable"),
+                          })}{" "}
+                          <ChevronDown
+                            className={
+                              technicalLog === log.id
+                                ? "size-3 rotate-180"
+                                : "size-3"
+                            }
+                          />
+                        </Button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="grid gap-1 pt-1 text-xs text-muted-foreground">
+                        <span>
+                          source_conversation_id: {log.source_conversation_id}
+                        </span>
+                        <span>
+                          resolved_target_id: {String(log.resolved_target_id)}
+                        </span>
+                        <span>action: {log.action ?? "—"}</span>
+                        <span>guard_reason: {log.guard_reason ?? "—"}</span>
+                        <span>detail: {log.detail ?? "—"}</span>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </li>
+                )
+              })}
             </ul>
           ) : (
             <p className="mt-3 text-sm text-muted-foreground">
-              No execution history.
+              {t("logs.empty")}
             </p>
           )}
           {nextCursor != null ? (
@@ -388,7 +636,7 @@ function RuleDetail({
               variant="outline"
               onClick={loadMore}
             >
-              Load more
+              {t("logs.loadMore")}
             </Button>
           ) : null}
         </div>

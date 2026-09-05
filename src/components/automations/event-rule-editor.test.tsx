@@ -1,8 +1,11 @@
+import { type ReactElement } from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { NextIntlClientProvider } from "next-intl"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { eventRulePreview, eventRuleValidate } from "@/lib/api"
 import type { DbConversationSummary, EventRuleDraft } from "@/lib/types"
 import { EventRuleEditor, newEventRuleDraft } from "./event-rule-editor"
+import enMessages from "@/i18n/messages/en.json"
 
 vi.mock("@/lib/api", () => ({
   eventRulePreview: vi.fn(),
@@ -29,27 +32,37 @@ const CONVERSATIONS: DbConversationSummary[] = [
   },
 ]
 
+function withIntl(ui: ReactElement) {
+  return (
+    <NextIntlClientProvider locale="en" messages={enMessages}>
+      {ui}
+    </NextIntlClientProvider>
+  )
+}
+
 describe("EventRuleEditor", () => {
   beforeEach(() => vi.clearAllMocks())
 
   it("keeps editable keyword and prompt data in the saved draft", async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     render(
-      <EventRuleEditor
-        initialScope={{ kind: "conversation", conversation_id: 41 }}
-        conversations={CONVERSATIONS}
-        onSubmit={onSubmit}
-      />
+      withIntl(
+        <EventRuleEditor
+          initialScope={{ kind: "conversation", conversation_id: 41 }}
+          conversations={CONVERSATIONS}
+          onSubmit={onSubmit}
+        />
+      )
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Add keyword" }))
     fireEvent.change(screen.getByLabelText("Keyword 4"), {
       target: { value: "MY_CUSTOM_ERROR_123" },
     })
-    fireEvent.change(screen.getByLabelText("Follow-up prompt"), {
+    fireEvent.change(screen.getByLabelText("Message to send"), {
       target: { value: "resume from the interruption" },
     })
-    fireEvent.click(screen.getByRole("button", { name: "Save rule" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
     await waitFor(() => expect(eventRuleValidate).toHaveBeenCalledTimes(1))
     const draft = onSubmit.mock.calls[0]?.[0] as EventRuleDraft
@@ -77,23 +90,22 @@ describe("EventRuleEditor", () => {
       guard_blocked: null,
     })
     render(
-      <EventRuleEditor
-        initialScope={{ kind: "conversation", conversation_id: 41 }}
-        conversations={CONVERSATIONS}
-        onSubmit={vi.fn()}
-      />
+      withIntl(
+        <EventRuleEditor
+          initialScope={{ kind: "conversation", conversation_id: 41 }}
+          conversations={CONVERSATIONS}
+          onSubmit={vi.fn()}
+        />
+      )
     )
-    fireEvent.change(screen.getByLabelText("Failed event text"), {
+    fireEvent.click(screen.getByRole("button", { name: /Test rule/ }))
+    fireEvent.change(screen.getByLabelText("Simulated error message"), {
       target: { value: "TLS connection reset" },
     })
-    fireEvent.click(
-      screen.getByRole("button", { name: "Preview without sending" })
-    )
+    fireEvent.click(screen.getByRole("button", { name: "Run test" }))
     await waitFor(() => expect(eventRulePreview).toHaveBeenCalledTimes(1))
     expect(eventRuleValidate).not.toHaveBeenCalled()
-    expect(
-      screen.getByText("This rule wins first-match ordering.")
-    ).toBeInTheDocument()
+    expect(screen.getByText("This rule will run.")).toBeInTheDocument()
   })
 
   it("starts the built-in-like draft disabled with the editable retry defaults", () => {
@@ -109,13 +121,68 @@ describe("EventRuleEditor", () => {
       message: "invalid event rule",
       detail: "invalid regex: unclosed character class",
     })
-    render(<EventRuleEditor conversations={CONVERSATIONS} onSubmit={vi.fn()} />)
+    render(
+      withIntl(
+        <EventRuleEditor conversations={CONVERSATIONS} onSubmit={vi.fn()} />
+      )
+    )
 
-    fireEvent.click(screen.getByRole("button", { name: "Save rule" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
     expect(
       await screen.findByText("invalid regex: unclosed character class")
     ).toBeInTheDocument()
     expect(screen.queryByText("[object Object]")).not.toBeInTheDocument()
+  })
+
+  it("keeps advanced implementation settings collapsed by default", () => {
+    render(
+      withIntl(
+        <EventRuleEditor conversations={CONVERSATIONS} onSubmit={vi.fn()} />
+      )
+    )
+
+    expect(screen.queryByLabelText("Priority")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /Advanced settings/ }))
+    expect(screen.getByLabelText("Priority")).toBeInTheDocument()
+    expect(screen.getByText("Applies to")).toBeInTheDocument()
+  })
+
+  it("uses named workspace and agent selectors in advanced settings", () => {
+    render(
+      withIntl(
+        <EventRuleEditor
+          conversations={CONVERSATIONS}
+          folders={[
+            {
+              id: 8,
+              name: "codeg",
+              alias: "Codeg",
+              path: "F:/AI_PROJECTS/codeg",
+            },
+          ]}
+          onSubmit={vi.fn()}
+        />
+      )
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Advanced settings/ }))
+    const selects = screen.getAllByRole("combobox")
+    fireEvent.click(selects[1])
+    fireEvent.click(screen.getByRole("option", { name: "Folder" }))
+    const folderTrigger = screen.getByRole("button", {
+      name: "Choose a folder",
+    })
+    fireEvent.click(folderTrigger)
+    expect(screen.getByRole("option", { name: /Codeg/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("option", { name: /Codeg/ }))
+    expect(screen.getByRole("button", { name: /Codeg/ })).toBeInTheDocument()
+
+    fireEvent.click(screen.getAllByRole("combobox")[1])
+    fireEvent.click(screen.getByRole("option", { name: "Agent type" }))
+    fireEvent.click(screen.getAllByRole("combobox")[2])
+    expect(
+      screen.getByRole("option", { name: "Claude Code" })
+    ).toBeInTheDocument()
   })
 })

@@ -227,7 +227,7 @@ export function AutomationsPage() {
           value={tab}
           onValueChange={(value) => setTab(value as typeof tab)}
         >
-          <TabsList aria-label="Automation type">
+          <TabsList aria-label={eventT("tabsLabel")}>
             <TabsTrigger value="scheduled">{eventT("scheduled")}</TabsTrigger>
             <TabsTrigger value="event">{eventT("event")}</TabsTrigger>
           </TabsList>
