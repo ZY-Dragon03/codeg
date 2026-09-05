@@ -1540,6 +1540,84 @@ export interface AutomationDraft {
   config: AutomationConfig
 }
 
+// Event Automations (Phase 1). The discriminated unions mirror Rust's
+// snake_case tagged wire representation.
+export type EventRuleScope =
+  | { kind: "global" }
+  | { kind: "conversation"; conversation_id: number }
+  | { kind: "folder"; folder_id: number }
+  | { kind: "agent_type"; agent_type: string }
+export type EventRuleConditionKind =
+  | "none"
+  | "contains"
+  | "regex"
+  | "error_kind"
+export interface EventRuleCondition {
+  kind: EventRuleConditionKind
+  match_mode: "any" | "all"
+  text_contains?: string[]
+  regex?: string | null
+  error_kind?: string | null
+}
+export interface EventRuleAction {
+  kind: "send_to_conversation"
+  conversation_ref: "source_conversation" | "specific_conversation"
+  conversation_id?: number | null
+  prompt: string
+}
+export interface EventRuleConfig {
+  scope: EventRuleScope
+  trigger: "turn_failed"
+  condition: EventRuleCondition
+  action: EventRuleAction
+  guard: { max_attempts: number; cooldown_ms: number }
+}
+export interface EventRuleDraft {
+  name: string
+  enabled: boolean
+  priority: number
+  config: EventRuleConfig
+}
+export interface EventRule extends EventRuleDraft {
+  id: number
+  builtin_key: string | null
+  created_at: string
+  updated_at: string
+}
+export interface EventRulePreviewSample {
+  conversationId: number
+  text: string
+  errorKind?: string | null
+}
+export interface EventRulePreview {
+  scope_matches: boolean
+  condition_matches: boolean
+  resolved_target_id: number | null
+  target_available: boolean
+  winner_rule_id: number | null
+  draft_is_winner: boolean
+  draft_is_shadowed: boolean
+  shadowed_rule_ids: number[]
+  guard_blocked: string | null
+}
+export interface EventRuleLog {
+  id: number
+  rule_id: number
+  source_conversation_id: number
+  status: "fired" | "skipped" | "failed"
+  detail: string | null
+  resolved_target_id: number | null
+  trigger: string | null
+  action: string | null
+  prompt_snapshot: string | null
+  guard_reason: string | null
+  created_at: string
+}
+export interface EventRuleLogPage {
+  items: EventRuleLog[]
+  next_cursor: number | null
+}
+
 // ─── Work tasks ────────────────────────────────────────────────────────────
 // Mirrors src-tauri/src/models/work_task.rs. Wire form is snake_case like
 // Automations. (Named WorkTask* because `Task` is taken by task-context.tsx.)

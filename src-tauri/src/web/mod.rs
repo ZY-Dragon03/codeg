@@ -763,6 +763,7 @@ pub(crate) async fn do_start_web_server_tauri(
 
     // Build AppState for the router
     let app_state = Arc::new(AppState {
+        event_rules_engine: crate::event_rules::EventRulesEngineHandle::new(),
         db: crate::db::AppDatabase {
             conn: app.state::<crate::db::AppDatabase>().conn.clone(),
         },

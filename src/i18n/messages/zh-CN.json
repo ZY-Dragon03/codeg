@@ -5586,5 +5586,6 @@
     "confirmDeleteConfirm": "删除",
     "canvasActions": "画布操作",
     "mergeIntoNewRegion": "新建区域"
-  }
+  },
+  "EventAutomations": { "scheduled": "定时自动化", "event": "事件自动化" }
 }

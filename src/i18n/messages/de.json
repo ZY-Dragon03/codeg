@@ -5586,5 +5586,9 @@
     "confirmDeleteConfirm": "Löschen",
     "canvasActions": "Leinwand-Aktionen",
     "mergeIntoNewRegion": "Neuer Bereich"
+  },
+  "EventAutomations": {
+    "scheduled": "Geplante Automatisierungen",
+    "event": "Ereignisautomatisierungen"
   }
 }

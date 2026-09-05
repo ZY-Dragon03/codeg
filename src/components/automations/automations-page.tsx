@@ -103,6 +103,8 @@ import {
 import { onTransportReconnect, subscribe } from "@/lib/platform"
 import { cn } from "@/lib/utils"
 import type { Automation, AutomationDraft, AutomationRun } from "@/lib/types"
+import { EventAutomationsPanel } from "./event-automations-panel"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 const AUTOMATION_CHANGED_EVENT = "automation://changed"
 
@@ -216,6 +218,35 @@ export function AutomationsPageTitle() {
 }
 
 export function AutomationsPage() {
+  const eventT = useTranslations("EventAutomations")
+  const [tab, setTab] = useState<"scheduled" | "event">("scheduled")
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 px-4 pt-3">
+        <Tabs
+          value={tab}
+          onValueChange={(value) => setTab(value as typeof tab)}
+        >
+          <TabsList aria-label="Automation type">
+            <TabsTrigger value="scheduled">{eventT("scheduled")}</TabsTrigger>
+            <TabsTrigger value="event">{eventT("event")}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+      <div className="min-h-0 flex-1">
+        {tab === "scheduled" ? (
+          <ScheduledAutomationsPage />
+        ) : (
+          <div className="h-full p-4">
+            <EventAutomationsPanel />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ScheduledAutomationsPage() {
   const t = useTranslations("Automations")
   const { automations, unseenFailures, refetch } = useAutomationsView()
   const folders = useAppWorkspaceStore((s) => s.folders)

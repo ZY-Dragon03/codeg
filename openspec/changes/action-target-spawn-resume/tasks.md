@@ -19,8 +19,8 @@
 
 ## Phase 1B 差额（先于开放 existing selector）
 
-- [ ] 3.1 从目标 DB 行解析真实 folder/agent/身份并重检 deleted/busy/offline，验证跨 folder 发送不沿用源 folder。
-- [ ] 3.2 验证 source 与 specific 目标、scope 分离、无隐式 spawn；历史 [x] 不代表这些新增情况已验证。
+- [x] 3.1 从目标 DB 行解析真实 folder/agent/身份并重检 deleted/busy/offline，验证跨 folder 发送不沿用源 folder。
+- [x] 3.2 验证 source 与 specific 目标、scope 分离、无隐式 spawn；历史 [x] 不代表这些新增情况已验证。
 
 ## Phase 3 原身份恢复
 

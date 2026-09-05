@@ -12,6 +12,10 @@ Provide a bounded review loop in which a reviewer explicitly continues an existi
 - **WHEN** reviewer 完成本轮但无有效结构化决定
 - **THEN** chain MUST 可见终止为 decision_missing，不自动 resume worker
 
+#### Scenario: 无效决定默认停止
+- **WHEN** reviewer decision 缺失、无法解析、字段无效或身份不符
+- **THEN** 系统 MUST 默认 STOP 并记录具体原因，MUST NOT 自动 CONTINUE；STOP 是安全终态而非隐式重试
+
 #### Scenario: 错误调用者
 - **WHEN** 非当前 reviewer 尝试提交决定
 - **THEN** 系统 MUST 拒绝且不派发动作
@@ -19,6 +23,8 @@ Provide a bounded review loop in which a reviewer explicitly continues an existi
 ### Requirement: 动态 continuation 仅指向已有会话
 
 CONTINUE MUST 指当前 worker；REROUTE MUST 指用户允许的另一个已存在 conversation，并附非空 prompt。EXIT MUST 结束链而不发送后续任务。
+
+所有 dynamic target MUST 在派发时重新通过用户配置的 allowed-target policy；仅在 UI selector 中过滤候选不足以满足此要求。目标后来失效或脱离允许范围时 MUST STOP，不扩大允许范围。
 
 #### Scenario: 改派 Worker B
 - **WHEN** reviewer 返回 reroute 到允许的现有 B
@@ -49,6 +55,8 @@ CONTINUE MUST 指当前 worker；REROUTE MUST 指用户允许的另一个已存�
 
 worker 成功完成后进入 reviewer 构成一轮，reviewer settle MUST 完成该轮计数一次；重复事件 MUST NOT 计新轮。retry 成功/空闲 MUST NOT 重置 review 计数。
 
+max_iterations=N MUST 允许第 N 轮 reviewer 执行；当该轮成功 settle 后 completed_iterations=N，MUST NOT 再派发 worker continuation。reviewer 失败 MUST 终止链，不凭失败或重放增加新一轮。
+
 #### Scenario: 重复完成
 - **WHEN** 同一本轮完成被重复投递
 - **THEN** 系统 MUST 只增加一次 completed_iterations 并最多派发一个下一动作
@@ -56,6 +64,8 @@ worker 成功完成后进入 reviewer 构成一轮，reviewer settle MUST 完成
 ### Requirement: 决策与动作可幂等审计
 
 每个 review request MUST 只接受一个有效决定，同一幂等键相同内容 MUST 返回原结果，冲突内容 MUST 拒绝。系统 MUST 持久化决定、guard、目标和执行结果。
+
+hard guard 覆盖 reviewer 决定时 MUST 同时保存 requested_decision、effective_decision 和 override reason，例如 requested=continue / effective=exit / reason=max_iterations；MUST NOT 用最终动作覆盖原始请求的审计记录。
 
 #### Scenario: 决策响应丢失后重试
 - **WHEN** reviewer 重提相同决定

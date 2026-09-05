@@ -23,6 +23,7 @@ pub struct AppState {
     /// subscribers). Distinct from `event_broadcaster`, which carries
     /// JSON-shaped `WebEvent`s for transport-bound delivery.
     pub acp_event_bus: Arc<InternalEventBus>,
+    pub event_rules_engine: crate::event_rules::EventRulesEngineHandle,
     pub emitter: EventEmitter,
     pub data_dir: PathBuf,
     pub web_server_state: WebServerState,
@@ -209,6 +210,7 @@ impl AppState {
         let broadcaster = Arc::new(WebEventBroadcaster::new());
         let metrics = Arc::new(EventBusMetrics::default());
         let acp_event_bus = Arc::new(InternalEventBus::new(metrics));
+        let event_rules_engine = crate::event_rules::EventRulesEngineHandle::new();
         let emitter = EventEmitter::web_only(broadcaster.clone(), acp_event_bus.clone());
 
         let connection_manager = default_connection_manager();
@@ -228,6 +230,7 @@ impl AppState {
             terminal_manager: default_terminal_manager(),
             event_broadcaster: broadcaster,
             acp_event_bus,
+            event_rules_engine,
             emitter,
             data_dir,
             web_server_state: crate::web::WebServerState::new(),

@@ -11,6 +11,7 @@ pub mod custom_skills;
 pub mod delegation;
 mod error;
 pub mod event_metrics;
+pub mod event_rule;
 pub mod experts;
 pub mod feedback;
 pub mod files;

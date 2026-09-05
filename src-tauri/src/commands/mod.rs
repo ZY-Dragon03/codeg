@@ -11,6 +11,7 @@ pub mod conversations;
 pub mod custom_agents;
 pub mod custom_skills;
 pub mod delegation;
+pub mod event_rule;
 pub mod experts;
 pub mod feedback;
 #[cfg(feature = "tauri-runtime")]

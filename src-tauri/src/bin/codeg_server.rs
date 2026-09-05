@@ -253,6 +253,7 @@ async fn async_main() -> ExitCode {
         event_bus_metrics.clone(),
     ));
     let emitter = EventEmitter::web_only(broadcaster.clone(), acp_event_bus.clone());
+    let event_rules_engine = codeg_lib::event_rules::EventRulesEngineHandle::new();
 
     // Build AppState
     let pet_state_handle = codeg_lib::pet_state_mapper::new_pet_state_handle();
@@ -276,6 +277,7 @@ async fn async_main() -> ExitCode {
         terminal_manager: codeg_lib::app_state::default_terminal_manager(),
         event_broadcaster: broadcaster,
         acp_event_bus: acp_event_bus.clone(),
+        event_rules_engine: event_rules_engine.clone(),
         emitter,
         data_dir,
         web_server_state: WebServerState::new(),
@@ -311,6 +313,16 @@ async fn async_main() -> ExitCode {
     // timeout to apply here.
     codeg_lib::commands::delegation::apply_persisted_config(&state.db.conn, &delegation_broker)
         .await;
+
+    let event_engine = std::sync::Arc::new(codeg_lib::event_rules::EventRulesEngine::new(
+        codeg_lib::db::AppDatabase {
+            conn: state.db.conn.clone(),
+        },
+        state.connection_manager.clone_ref(),
+        state.acp_event_bus.clone(),
+    ));
+    event_rules_engine.set(event_engine.clone());
+    tokio::spawn(event_engine.run());
     // Same for the live-feedback enable flag, so the first companion launch
     // sees the operator's configured behavior.
     codeg_lib::commands::feedback::apply_persisted_feedback_config(

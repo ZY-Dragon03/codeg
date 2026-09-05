@@ -5586,5 +5586,9 @@
     "confirmDeleteConfirm": "حذف",
     "canvasActions": "إجراءات اللوحة",
     "mergeIntoNewRegion": "منطقة جديدة"
+  },
+  "EventAutomations": {
+    "scheduled": "عمليات الأتمتة المجدولة",
+    "event": "عمليات أتمتة الأحداث"
   }
 }

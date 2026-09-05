@@ -5586,5 +5586,9 @@
     "confirmDeleteConfirm": "削除",
     "canvasActions": "キャンバス操作",
     "mergeIntoNewRegion": "新しい領域"
+  },
+  "EventAutomations": {
+    "scheduled": "スケジュール自動化",
+    "event": "イベント自動化"
   }
 }

@@ -24,6 +24,11 @@ import type {
   Automation,
   AutomationRun,
   AutomationDraft,
+  EventRule,
+  EventRuleDraft,
+  EventRuleLogPage,
+  EventRulePreview,
+  EventRulePreviewSample,
   ForgeChangeDetail,
   ForgeChangedFileList,
   ForgeComment,
@@ -3419,6 +3424,53 @@ export async function automationRunNow(automationId: number): Promise<number> {
 /** Cancel an in-flight (or clear a wedged) run. */
 export async function automationCancelRun(runId: number): Promise<void> {
   return getTransport().call("automation_cancel_run", { runId })
+}
+
+// Event Automations
+export async function eventRuleList(): Promise<EventRule[]> {
+  return getTransport().call("event_rule_list")
+}
+export async function eventRuleCreate(
+  draft: EventRuleDraft
+): Promise<EventRule> {
+  return getTransport().call("event_rule_create", { draft })
+}
+export async function eventRuleUpdate(
+  id: number,
+  draft: EventRuleDraft
+): Promise<EventRule> {
+  return getTransport().call("event_rule_update", { id, draft })
+}
+export async function eventRuleSetEnabled(
+  id: number,
+  enabled: boolean
+): Promise<EventRule> {
+  return getTransport().call("event_rule_set_enabled", { id, enabled })
+}
+export async function eventRuleDelete(id: number): Promise<void> {
+  return getTransport().call("event_rule_delete", { id })
+}
+export async function eventRuleValidate(draft: EventRuleDraft): Promise<void> {
+  return getTransport().call("event_rule_validate", { draft })
+}
+export async function eventRulePreview(
+  ruleId: number | null,
+  draft: EventRuleDraft,
+  sample: EventRulePreviewSample
+): Promise<EventRulePreview> {
+  return getTransport().call("event_rule_preview", {
+    ruleId,
+    draft,
+    sample,
+  })
+}
+export async function eventRuleListLogs(params: {
+  ruleId?: number | null
+  conversationId?: number | null
+  cursor?: number | null
+  limit?: number
+}): Promise<EventRuleLogPage> {
+  return getTransport().call("event_rule_list_logs", params)
 }
 
 // Work tasks

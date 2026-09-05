@@ -1,0 +1,107 @@
+{
+  "changeName": "event-lifecycle-bus",
+  "changeDir": "F:\\AI_PROJECTS\\codeg-event-automation-current\\openspec\\changes\\event-lifecycle-bus",
+  "schemaName": "spec-driven",
+  "contextFiles": {
+    "proposal": [
+      "F:\\AI_PROJECTS\\codeg-event-automation-current\\openspec\\changes\\event-lifecycle-bus\\proposal.md"
+    ],
+    "specs": [
+      "F:\\AI_PROJECTS\\codeg-event-automation-current\\openspec\\changes\\event-lifecycle-bus\\specs\\event-lifecycle-bus\\spec.md"
+    ],
+    "design": [
+      "F:\\AI_PROJECTS\\codeg-event-automation-current\\openspec\\changes\\event-lifecycle-bus\\design.md"
+    ],
+    "tasks": [
+      "F:\\AI_PROJECTS\\codeg-event-automation-current\\openspec\\changes\\event-lifecycle-bus\\tasks.md"
+    ]
+  },
+  "progress": {
+    "total": 15,
+    "complete": 11,
+    "remaining": 4
+  },
+  "tasks": [
+    {
+      "id": "1",
+      "description": "1.1 `LifecycleEvent` + `EventKind` 定义",
+      "done": true
+    },
+    {
+      "id": "2",
+      "description": "1.2 `turn_failed` 在 ACP 错误分类点发布",
+      "done": true
+    },
+    {
+      "id": "3",
+      "description": "2.1 `event_rules` 表 + CRUD API",
+      "done": true
+    },
+    {
+      "id": "4",
+      "description": "2.2 Rule JSON schema 校验（trigger/condition/action/guard）",
+      "done": true
+    },
+    {
+      "id": "5",
+      "description": "3.1 `match_rules(event) -> Vec<MatchedRule>`",
+      "done": true
+    },
+    {
+      "id": "6",
+      "description": "3.2 contains / regex / error_kind 求值",
+      "done": true
+    },
+    {
+      "id": "7",
+      "description": "3.3 单元测试：TLS 样本命中/不命中",
+      "done": true
+    },
+    {
+      "id": "8",
+      "description": "4.1 文档列出 `turn_completed`、`terminal_exited`、`timer_fired` 接入点（本 change 可不实现发布）",
+      "done": true
+    },
+    {
+      "id": "9",
+      "description": "5.1 CRUD 后 `EventRulesEngine.reload_rules()` 热重载",
+      "done": true
+    },
+    {
+      "id": "10",
+      "description": "5.2 `SessionFailure` + `AcpEvent::Error` 合并缓冲，在 `TurnComplete` 后单次执行",
+      "done": true
+    },
+    {
+      "id": "11",
+      "description": "5.3 `conversation + turn_session_id + failure_record_id + fingerprint` 去重（30s TTL）",
+      "done": true
+    },
+    {
+      "id": "12",
+      "description": "6.1 对比 ACP lifecycle/connection/manager、identity、delegation、Automations、migrations、app_state 与双模式注册，记录实际复用和差异，禁止整体移入旧实现。",
+      "done": false
+    },
+    {
+      "id": "13",
+      "description": "6.2 将 turn_failed、持久化 CRUD/matcher/send/retry/dedup/settle/hot reload 适配最新接口；target identity 从 DB 解析，验证源码和针对性 Rust 测试。",
+      "done": false
+    },
+    {
+      "id": "14",
+      "description": "6.3 通过独立 Phase 1A review，验证未机械覆盖 upstream、时序和跨 folder 身份；所有发现修复后记录复核。",
+      "done": false
+    },
+    {
+      "id": "15",
+      "description": "6.4 Desktop/Web 注册及迁移与原有 schema 共存，验证两模式编译及 runtime 迁移。",
+      "done": false
+    }
+  ],
+  "state": "ready",
+  "instruction": "Read context files, work through pending tasks, mark complete as you go.\nPause if you hit blockers or need clarification.",
+  "root": {
+    "path": "F:\\AI_PROJECTS\\codeg-event-automation-current",
+    "source": "nearest"
+  }
+}

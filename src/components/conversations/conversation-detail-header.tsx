@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Circle,
   EllipsisVertical,
+  Zap,
   Info,
   Pencil,
   Pin,
@@ -58,10 +59,17 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import {
   resolveActiveSessionDetails,
   type ActiveSessionDetails,
 } from "./active-session-details"
 import { SessionDetailsDialog } from "./session-details-dialog"
+import { EventAutomationsPanel } from "@/components/automations/event-automations-panel"
 
 interface ConversationDetailHeaderProps {
   tabId: string
@@ -128,6 +136,7 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
   )
 
   const [details, setDetails] = useState<ActiveSessionDetails | null>(null)
+  const [eventAutomationsOpen, setEventAutomationsOpen] = useState(false)
   // Snapshot the action target when a dialog OPENS. The header is a SINGLE
   // instance reused across active tabs (see conversation-detail-panel), and the
   // global tab-switch / close-tab shortcuts still fire while a dialog is open —
@@ -261,6 +270,32 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
         </span>
       </div>
       <div className="flex shrink-0 items-center">
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="mr-1 h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+                title={
+                  persisted
+                    ? "Event Automation"
+                    : "Send a message first to persist this conversation."
+                }
+                onClick={() => setEventAutomationsOpen(true)}
+              >
+                <Zap className="size-3.5" aria-hidden />
+                <span className="hidden sm:inline">Event Automation</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {persisted
+                ? "Manage Event Automation"
+                : "Send a message first to persist this conversation."}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -330,6 +365,18 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <Dialog
+        open={eventAutomationsOpen}
+        onOpenChange={setEventAutomationsOpen}
+      >
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Event Automation</DialogTitle>
+          </DialogHeader>
+          <EventAutomationsPanel conversationId={conversationId} dialog />
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={renameTarget != null}

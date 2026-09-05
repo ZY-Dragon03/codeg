@@ -1,5 +1,7 @@
 pub mod agent;
 pub mod automation;
+pub mod event_rule;
+pub use event_rule::{EventRuleDraft, EventRuleInfo};
 pub mod background;
 pub mod canvas;
 pub mod chat_channel;

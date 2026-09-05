@@ -5586,5 +5586,9 @@
     "confirmDeleteConfirm": "Supprimer",
     "canvasActions": "Actions du canevas",
     "mergeIntoNewRegion": "Nouvelle région"
+  },
+  "EventAutomations": {
+    "scheduled": "Automatisations planifiées",
+    "event": "Automatisations événementielles"
   }
 }

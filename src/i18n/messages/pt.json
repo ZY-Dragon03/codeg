@@ -5586,5 +5586,9 @@
     "confirmDeleteConfirm": "Excluir",
     "canvasActions": "Ações do quadro",
     "mergeIntoNewRegion": "Nova região"
+  },
+  "EventAutomations": {
+    "scheduled": "Automações agendadas",
+    "event": "Automações de eventos"
   }
 }

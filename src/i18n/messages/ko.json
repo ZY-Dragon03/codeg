@@ -5586,5 +5586,6 @@
     "confirmDeleteConfirm": "삭제",
     "canvasActions": "캔버스 작업",
     "mergeIntoNewRegion": "새 영역"
-  }
+  },
+  "EventAutomations": { "scheduled": "예약 자동화", "event": "이벤트 자동화" }
 }

@@ -1,0 +1,9 @@
+{
+  "name": "codeg-event-automation-fixture",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "codeg-event-automation-fixture": "./acp-fixture.mjs"
+  }
+}
