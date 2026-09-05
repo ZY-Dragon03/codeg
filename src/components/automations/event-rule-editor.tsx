@@ -15,6 +15,7 @@ import type {
   EventRuleScope,
 } from "@/lib/types"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Collapsible,
   CollapsibleContent,
@@ -45,10 +46,12 @@ export function newEventRuleDraft(
     enabled: false,
     priority: 0,
     config: {
+      automation_type: "content_detection",
       scope,
-      trigger: "turn_failed",
+      trigger: "content_matched",
       condition: {
         kind: "contains",
+        source: "ai_output",
         match_mode: "any",
         text_contains: defaults?.keywords ?? [
           "RetriableError",
@@ -60,6 +63,15 @@ export function newEventRuleDraft(
         kind: "send_to_conversation",
         conversation_ref: "source_conversation",
         prompt: defaults?.prompt ?? "继续",
+        target_conversation_ids: [],
+        include_source_context: false,
+        include_recent_user_message: false,
+        include_final_report: false,
+        additional_prompt: null,
+        recent_user_message_ignore_rules: [
+          { kind: "exact", value: "继续" },
+          { kind: "exact", value: "continue" },
+        ],
       },
       guard: { max_attempts: 3, cooldown_ms: 5000 },
     },
@@ -274,11 +286,86 @@ export function EventRuleEditor({
 
       <fieldset className="grid gap-3 rounded-xl border p-4">
         <legend className="px-1 text-sm font-semibold">
+          {t("editor.creationType")}
+        </legend>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Button
+            type="button"
+            variant={
+              (draft.config.automation_type ?? "content_detection") ===
+              "content_detection"
+                ? "default"
+                : "outline"
+            }
+            onClick={() =>
+              update((d) => ({
+                ...d,
+                config: {
+                  ...d.config,
+                  automation_type: "content_detection",
+                  trigger: "content_matched",
+                },
+              }))
+            }
+          >
+            {t("editor.contentDetection")}
+          </Button>
+          <Button
+            type="button"
+            variant={
+              draft.config.automation_type === "forward_after_task_completion"
+                ? "default"
+                : "outline"
+            }
+            onClick={() =>
+              update((d) => ({
+                ...d,
+                config: {
+                  ...d.config,
+                  automation_type: "forward_after_task_completion",
+                  trigger: "turn_completed",
+                },
+              }))
+            }
+          >
+            {t("editor.forwardAfterCompletion")}
+          </Button>
+        </div>
+      </fieldset>
+
+      <fieldset className="grid gap-3 rounded-xl border p-4">
+        <legend className="px-1 text-sm font-semibold">
           {t("editor.when")}
         </legend>
         <p className="text-sm text-muted-foreground">
           {t("editor.whenDescription")}
         </p>
+        {draft.config.automation_type !== "forward_after_task_completion" ? (
+          <div className="grid gap-2">
+            <Label>{t("editor.contentSource")}</Label>
+            <div className="flex flex-wrap gap-2">
+              {(["ai_output", "error", "both"] as const).map((source) => (
+                <Button
+                  type="button"
+                  key={source}
+                  size="sm"
+                  variant={
+                    (condition.source ?? "ai_output") === source
+                      ? "default"
+                      : "outline"
+                  }
+                  onClick={() => setCondition({ ...condition, source })}
+                >
+                  {source === "ai_output"
+                    ? t("editor.sourceAiOutput")
+                    : source === "error"
+                      ? t("editor.sourceError")
+                      : t("editor.sourceBoth")}
+                </Button>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div className="grid gap-2">
           <Label>{t("editor.errorContains")}</Label>
           {condition.kind === "contains" ? (
@@ -383,6 +470,233 @@ export function EventRuleEditor({
         <p className="text-xs text-muted-foreground">
           {t("editor.sourceConversation")}
         </p>
+        <div className="grid gap-2 rounded-lg bg-muted/40 p-3">
+          <Label>{t("editor.payload")}</Label>
+          {(
+            [
+              ["include_source_context", t("editor.includeSourceContext")],
+              [
+                "include_recent_user_message",
+                t("editor.includeRecentUserMessage"),
+              ],
+              ["include_final_report", t("editor.includeFinalReport")],
+            ] as const
+          ).map(([key, label]) => (
+            <label className="flex items-center gap-2 text-sm" key={key}>
+              <Checkbox
+                checked={Boolean(action[key])}
+                onCheckedChange={(checked) =>
+                  update((d) => ({
+                    ...d,
+                    config: {
+                      ...d.config,
+                      action: {
+                        ...d.config.action,
+                        [key]: checked === true,
+                      },
+                    },
+                  }))
+                }
+              />
+              {label}
+            </label>
+          ))}
+          <Label htmlFor="event-rule-additional-prompt">
+            {t("editor.additionalPrompt")}
+          </Label>
+          <Textarea
+            id="event-rule-additional-prompt"
+            value={action.additional_prompt ?? ""}
+            onChange={(e) =>
+              update((d) => ({
+                ...d,
+                config: {
+                  ...d.config,
+                  action: {
+                    ...d.config.action,
+                    additional_prompt: e.target.value,
+                  },
+                },
+              }))
+            }
+          />
+          <div className="grid gap-2 rounded-lg border bg-background p-3">
+            <Label>{t("editor.recentUserIgnore")}</Label>
+            <p className="text-xs text-muted-foreground">
+              {t("editor.recentUserIgnoreHint")}
+            </p>
+            {(action.recent_user_message_ignore_rules ?? []).map(
+              (rule, index) => (
+                <div className="flex gap-2" key={`${index}-${rule.kind}`}>
+                  <div className="flex shrink-0 gap-1" role="group">
+                    {(
+                      [
+                        ["exact", t("editor.ignoreExact")],
+                        ["contains", t("editor.ignoreContains")],
+                        ["regex", t("editor.ignoreRegex")],
+                      ] as const
+                    ).map(([kind, label]) => (
+                      <Button
+                        key={kind}
+                        type="button"
+                        size="sm"
+                        variant={rule.kind === kind ? "default" : "outline"}
+                        aria-pressed={rule.kind === kind}
+                        onClick={() =>
+                          update((d) => ({
+                            ...d,
+                            config: {
+                              ...d.config,
+                              action: {
+                                ...d.config.action,
+                                recent_user_message_ignore_rules: (
+                                  d.config.action
+                                    .recent_user_message_ignore_rules ?? []
+                                ).map((item, itemIndex) =>
+                                  itemIndex === index ? { ...item, kind } : item
+                                ),
+                              },
+                            },
+                          }))
+                        }
+                      >
+                        {label}
+                      </Button>
+                    ))}
+                  </div>
+                  <Input
+                    value={rule.value}
+                    aria-label={t("editor.recentUserIgnore")}
+                    onChange={(e) =>
+                      update((d) => ({
+                        ...d,
+                        config: {
+                          ...d.config,
+                          action: {
+                            ...d.config.action,
+                            recent_user_message_ignore_rules: (
+                              d.config.action
+                                .recent_user_message_ignore_rules ?? []
+                            ).map((item, itemIndex) =>
+                              itemIndex === index
+                                ? { ...item, value: e.target.value }
+                                : item
+                            ),
+                          },
+                        },
+                      }))
+                    }
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={t("editor.removeIgnoreRule")}
+                    onClick={() =>
+                      update((d) => ({
+                        ...d,
+                        config: {
+                          ...d.config,
+                          action: {
+                            ...d.config.action,
+                            recent_user_message_ignore_rules: (
+                              d.config.action
+                                .recent_user_message_ignore_rules ?? []
+                            ).filter((_, itemIndex) => itemIndex !== index),
+                          },
+                        },
+                      }))
+                    }
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </div>
+              )
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-fit"
+              onClick={() =>
+                update((d) => ({
+                  ...d,
+                  config: {
+                    ...d.config,
+                    action: {
+                      ...d.config.action,
+                      recent_user_message_ignore_rules: [
+                        ...(d.config.action.recent_user_message_ignore_rules ??
+                          []),
+                        { kind: "exact", value: "" },
+                      ],
+                    },
+                  },
+                }))
+              }
+            >
+              <Plus className="size-4" /> {t("editor.addIgnoreRule")}
+            </Button>
+          </div>
+        </div>
+        <div className="grid gap-2">
+          <Label>{t("editor.additionalTargets")}</Label>
+          <p className="text-xs text-muted-foreground">
+            {t("editor.additionalTargetsHint")}
+          </p>
+          <div className="grid max-h-48 gap-2 overflow-auto rounded-lg border p-2">
+            {sortedConversations.map((conversation) => {
+              const checked = (action.target_conversation_ids ?? []).includes(
+                conversation.id
+              )
+              const metadata = [
+                getAgentLabel(conversation.agent_type),
+                folders.find((folder) => folder.id === conversation.folder_id)
+                  ?.alias,
+              ]
+                .filter(Boolean)
+                .join(" · ")
+              return (
+                <label
+                  className="flex items-start gap-2 text-sm"
+                  key={conversation.id}
+                >
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={(next) =>
+                      update((d) => {
+                        const current =
+                          d.config.action.target_conversation_ids ?? []
+                        const ids =
+                          next === true
+                            ? [...new Set([...current, conversation.id])]
+                            : current.filter((id) => id !== conversation.id)
+                        return {
+                          ...d,
+                          config: {
+                            ...d.config,
+                            action: {
+                              ...d.config.action,
+                              target_conversation_ids: ids,
+                            },
+                          },
+                        }
+                      })
+                    }
+                  />
+                  <span>
+                    {conversation.title || t("editor.selectConversation")}
+                    {metadata ? (
+                      <span className="block text-xs text-muted-foreground">
+                        {metadata}
+                      </span>
+                    ) : null}
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+        </div>
       </fieldset>
 
       <fieldset className="grid gap-3 rounded-xl border p-4">
@@ -731,20 +1045,34 @@ export function EventRuleEditor({
               onValueChange={(kind) =>
                 setCondition(
                   kind === "contains"
-                    ? { kind, match_mode: "any", text_contains: keywords }
+                    ? {
+                        kind,
+                        source: condition.source ?? "ai_output",
+                        match_mode: "any",
+                        text_contains: keywords,
+                      }
                     : kind === "regex"
                       ? {
                           kind,
+                          source: condition.source ?? "ai_output",
                           match_mode: "any",
                           regex: condition.regex ?? "",
                         }
                       : kind === "error_kind"
                         ? {
                             kind,
+                            source: "error",
                             match_mode: "any",
                             error_kind: condition.error_kind ?? "",
+                            error_severity: condition.error_severity ?? "",
+                            error_title: condition.error_title ?? "",
+                            error_details: condition.error_details ?? "",
                           }
-                        : { kind: "none", match_mode: "any" }
+                        : {
+                            kind: "none",
+                            source: condition.source ?? "ai_output",
+                            match_mode: "any",
+                          }
                 )
               }
             >
@@ -793,6 +1121,36 @@ export function EventRuleEditor({
               <p className="text-xs text-muted-foreground">
                 {t("editor.scopeHint")}
               </p>
+              <Label htmlFor="event-rule-error-severity">
+                {t("editor.errorSeverity")}
+              </Label>
+              <Input
+                id="event-rule-error-severity"
+                value={condition.error_severity ?? ""}
+                onChange={(e) =>
+                  setCondition({ ...condition, error_severity: e.target.value })
+                }
+              />
+              <Label htmlFor="event-rule-error-title">
+                {t("editor.errorTitle")}
+              </Label>
+              <Input
+                id="event-rule-error-title"
+                value={condition.error_title ?? ""}
+                onChange={(e) =>
+                  setCondition({ ...condition, error_title: e.target.value })
+                }
+              />
+              <Label htmlFor="event-rule-error-details">
+                {t("editor.errorDetails")}
+              </Label>
+              <Textarea
+                id="event-rule-error-details"
+                value={condition.error_details ?? ""}
+                onChange={(e) =>
+                  setCondition({ ...condition, error_details: e.target.value })
+                }
+              />
             </div>
           ) : null}
           <div className="grid gap-1.5">

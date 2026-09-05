@@ -135,3 +135,18 @@ Phase 2+ 保留 Wake、reviewer、parent/spawned aliases。通用预算/状态�
 - [turn-failed-auto-resume/proposal.md](../turn-failed-auto-resume/proposal.md)
 - [turn-failed-auto-resume/specs/turn-failed-auto-resume/spec.md](../turn-failed-auto-resume/specs/turn-failed-auto-resume/spec.md)
 - [turn-failed-auto-resume/tasks.md](../turn-failed-auto-resume/tasks.md)
+
+## Product model revision (2026-09-06)
+
+### Single-owner matrix
+
+| Capability | Single owner | Current phase |
+|---|---|---|
+| Envelope, settle, merge, dedup | event-lifecycle-bus | Phase 1A |
+| Existing target resolution/send/receipts | action-target-spawn-resume | Phase 1A/1B |
+| Attempts and cooldown | event rule service / turn-failed contract | Phase 1A |
+| Scope, editor, preview, logs and product UI | event-automation-ui | Phase 1 |
+| Reviewer decision, iterations and chain depth | reviewer-controlled-handoff | Later |
+| Timer/process wakes | agent-wake-scheduler | After backend |
+
+Phase 1 UI does not expose reviewer target/decision/chain fields. Runtime acceptance records branch/commit, locale, rule/source/target identity, actual prompt, log receipt and restart result; absent Desktop/Web evidence remains `UNKNOWN_NOT_PROVEN`.

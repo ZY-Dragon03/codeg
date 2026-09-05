@@ -47,6 +47,7 @@ pub mod web;
 pub mod work_task;
 pub mod workspace_state;
 pub mod workspace_transfer;
+pub mod wake_scheduler;
 
 /// Sweep stale ACP binary cache trash created by the rename-aside fallback in
 /// `acp::binary_cache::clear_agent_cache`. Safe to call any time; intended to
@@ -818,14 +819,20 @@ mod tauri_app {
                     });
 
                     let listener_broker = broker.clone();
+                    let parent_lookup: std::sync::Arc<dyn crate::acp::delegation::listener::ParentSessionLookup> =
+                        std::sync::Arc::new(crate::acp::manager::ConnectionManagerParentLookup {
+                            manager: std::sync::Arc::new(cm_state.clone_ref()),
+                        });
+                    let session_info_lookup: std::sync::Arc<dyn crate::acp::session_info::SessionInfoAccess> =
+                        std::sync::Arc::new(crate::commands::session_info::DbSessionInfoLookup::new(
+                            std::sync::Arc::new(db::AppDatabase {
+                                conn: db_conn.clone(),
+                            }),
+                        ));
                     let listener = crate::acp::delegation::listener::DelegationListener::new(
                         listener_broker,
-                        tokens,
-                        std::sync::Arc::new(
-                            crate::acp::manager::ConnectionManagerParentLookup {
-                                manager: std::sync::Arc::new(cm_state.clone_ref()),
-                            },
-                        ),
+                        tokens.clone(),
+                        parent_lookup.clone(),
                         std::sync::Arc::new(
                             crate::acp::manager::ConnectionManagerFeedbackLookup {
                                 manager: std::sync::Arc::new(cm_state.clone_ref()),
@@ -836,13 +843,7 @@ mod tauri_app {
                                 manager: std::sync::Arc::new(cm_state.clone_ref()),
                             },
                         ),
-                        std::sync::Arc::new(
-                            crate::commands::session_info::DbSessionInfoLookup::new(
-                                std::sync::Arc::new(db::AppDatabase {
-                                    conn: db_conn.clone(),
-                                }),
-                            ),
-                        ),
+                        session_info_lookup.clone(),
                         std::sync::Arc::new(crate::work_task::EngineWorkTaskTools),
                         std::sync::Arc::new(
                             crate::commands::chat_authoring::DbChatAuthoring::new(
@@ -856,7 +857,19 @@ mod tauri_app {
                             ),
                         ),
                     );
+                    let event_automation = std::sync::Arc::new(
+                        crate::acp::delegation::listener::ConnectionEventAutomationAccess {
+                            db: db::AppDatabase {
+                                conn: db_conn.clone(),
+                            },
+                            manager: cm_state.clone_ref(),
+                            tokens: tokens.clone(),
+                            parent_lookup,
+                            session_info: session_info_lookup,
+                        },
+                    );
                     tauri::async_runtime::spawn(async move {
+                        listener.set_event_automation(event_automation).await;
                         if let Err(e) = listener.run(socket_path).await {
                             tracing::info!("[delegation] listener exited: {e}");
                         }
@@ -899,6 +912,18 @@ mod tauri_app {
                     app.state::<crate::event_rules::EventRulesEngineHandle>()
                         .set(engine.clone());
                     tauri::async_runtime::spawn(engine.run());
+                }
+
+                {
+                    let scheduler = crate::wake_scheduler::WakeScheduler::new(
+                        db::AppDatabase {
+                            conn: app.state::<db::AppDatabase>().conn.clone(),
+                        },
+                        app.state::<ConnectionManager>().clone_ref(),
+                    );
+                    app.state::<crate::terminal::manager::TerminalManager>()
+                        .set_wake_scheduler(scheduler.clone());
+                    tauri::async_runtime::spawn(scheduler.run());
                 }
 
                 match tauri::async_runtime::block_on(web::load_web_service_config(&db.conn)) {

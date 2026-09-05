@@ -4,9 +4,12 @@
 
 ## Goals / Non-Goals
 
-**Goals:** Event 类型、Rule 存储、match-only 引擎、阶段一 `turn_failed` 发布。
+**Goals:** Event 类型、Rule 存储、match-only 引擎、阶段一 settled failure,
+content-match and normal-completion publication.
 
-**Non-Goals:** 阶段一不发布 `timer_fired`（属 wake-scheduler）；不执行 action。
+**Non-Goals:** timer/process wake persistence belongs to wake-scheduler; this
+change does not define a second action executor. It publishes the event and
+returns a match; action-target owns target resolution/send receipts.
 
 ## Decisions
 

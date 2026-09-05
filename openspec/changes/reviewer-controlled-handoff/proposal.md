@@ -24,3 +24,7 @@ Reviewer 完成不等于原 worker 应继续。系统需要明确、可审计、
 ## Impact
 
 复用 EventRulesEngine、ACP lifecycle/action、codeg-mcp companion、AutomationConfig、conversation 数据；新增持久化 chain 协议和日志，非第二套规则执行系统。依赖 action-target/success lifecycle；New target 依赖 spawn，Existing 最小切片不依赖 spawn 或 Wake。
+
+## Product model revision (2026-09-06)
+
+Reviewer orchestration is retained as a later capability and is not redesigned or made a Phase 1 prerequisite. The current product loop is ordinary completion forwarding to an existing reviewer conversation plus authorized MCP send/read-context tools. When the reviewer protocol is implemented, dynamic targets must use a frozen allowed-target policy, exact iteration/depth guards, fail-closed missing decisions, and requested/effective decision audit fields.

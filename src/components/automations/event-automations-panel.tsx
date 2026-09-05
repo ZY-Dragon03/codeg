@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/collapsible"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Switch } from "@/components/ui/switch"
+import { Input } from "@/components/ui/input"
 import type { FolderSelectOption } from "@/components/shared/folder-select"
 import { EventRuleEditor } from "./event-rule-editor"
 
@@ -184,6 +185,7 @@ export function EventAutomationsPanel({
   const [logs, setLogs] = useState<EventRuleLog[]>([])
   const [nextCursor, setNextCursor] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState("")
   const request = useRef(0)
 
   const folderOptions = useMemo<FolderSelectOption[]>(
@@ -255,13 +257,46 @@ export function EventAutomationsPanel({
     return () => window.clearTimeout(initialLogs)
   }, [selected, loadLogs])
 
-  const visibleRules = useMemo(
-    () =>
-      rules.filter((rule) =>
-        isApplicable(rule, conversationId, folderId, agentType)
-      ),
-    [rules, conversationId, folderId, agentType]
-  )
+  const visibleRules = useMemo(() => {
+    const needle = search.trim().toLocaleLowerCase()
+    return rules
+      .filter((rule) => isApplicable(rule, conversationId, folderId, agentType))
+      .filter((rule) => {
+        if (!needle) return true
+        const condition = rule.config.condition
+        const haystack = [
+          rule.name,
+          ...(condition.text_contains ?? []),
+          condition.regex ?? "",
+          condition.error_kind ?? "",
+          condition.error_title ?? "",
+          condition.error_details ?? "",
+          rule.config.action.prompt,
+          rule.config.action.additional_prompt ?? "",
+          ...(rule.config.action.recent_user_message_ignore_rules ?? []).map(
+            (ignoreRule) => ignoreRule.value
+          ),
+          ...(rule.config.action.target_conversation_ids ?? []).map(
+            (id) =>
+              conversations.find((conversation) => conversation.id === id)
+                ?.title ?? ""
+          ),
+        ]
+          .join(" ")
+          .toLocaleLowerCase()
+        return haystack.includes(needle)
+      })
+      .sort((a, b) => {
+        const aApplies = isApplicable(a, conversationId, folderId, agentType)
+        const bApplies = isApplicable(b, conversationId, folderId, agentType)
+        return (
+          Number(b.enabled) - Number(a.enabled) ||
+          Number(bApplies) - Number(aApplies) ||
+          b.priority - a.priority ||
+          a.id - b.id
+        )
+      })
+  }, [rules, conversations, search, conversationId, folderId, agentType])
   const initialScope =
     conversationId == null
       ? ({ kind: "global" } as const)
@@ -320,6 +355,12 @@ export function EventAutomationsPanel({
           </Button>
         </div>
       ) : null}
+      <Input
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+        placeholder={t("searchPlaceholder")}
+        aria-label={t("searchPlaceholder")}
+      />
       {cannotCreate ? (
         <p className="rounded-xl bg-muted px-3 py-2 text-sm text-muted-foreground">
           {t("header.disabledTooltip")}

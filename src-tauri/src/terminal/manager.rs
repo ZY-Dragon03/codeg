@@ -23,6 +23,7 @@ struct TerminalInstance {
 
 pub struct TerminalManager {
     terminals: Arc<Mutex<HashMap<String, TerminalInstance>>>,
+    wake_scheduler: Arc<Mutex<Option<Arc<crate::wake_scheduler::WakeScheduler>>>>,
 }
 
 pub(crate) fn resolve_shell() -> String {
@@ -211,6 +212,7 @@ impl TerminalManager {
     pub fn new() -> Self {
         Self {
             terminals: Arc::new(Mutex::new(HashMap::new())),
+            wake_scheduler: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -218,7 +220,15 @@ impl TerminalManager {
     pub fn clone_ref(&self) -> Self {
         Self {
             terminals: self.terminals.clone(),
+            wake_scheduler: self.wake_scheduler.clone(),
         }
+    }
+
+    /// Install the process-exit wake sink after the database-backed scheduler
+    /// is initialized. The terminal manager remains usable in tests and in
+    /// early bootstrap before a scheduler exists.
+    pub fn set_wake_scheduler(&self, scheduler: Arc<crate::wake_scheduler::WakeScheduler>) {
+        *self.wake_scheduler.lock().unwrap() = Some(scheduler);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -316,10 +326,19 @@ impl TerminalManager {
         // Named reader thread — emits per-terminal events
         let id_for_reader = terminal_id.clone();
         let terminals_ref = self.terminals.clone();
+        let wake_scheduler = self.wake_scheduler.clone();
+        let runtime_handle = tokio::runtime::Handle::try_current().ok();
         std::thread::Builder::new()
             .name(format!("pty-reader-{short_id}"))
             .spawn(move || {
-                read_loop(reader, id_for_reader, &emitter, &terminals_ref);
+                read_loop(
+                    reader,
+                    id_for_reader,
+                    &emitter,
+                    &terminals_ref,
+                    &wake_scheduler,
+                    runtime_handle,
+                );
             })
             .map_err(|e| TerminalError::SpawnFailed(e.to_string()))?;
 
@@ -367,6 +386,7 @@ impl TerminalManager {
     }
 
     pub fn list_with_exit_check(&self, emitter: Option<&EventEmitter>) -> Vec<TerminalInfo> {
+        let wake_scheduler = self.wake_scheduler.clone();
         let mut terminals = self.terminals.lock().unwrap();
         let mut exited_terminal_ids: Vec<String> = Vec::new();
 
@@ -403,6 +423,11 @@ impl TerminalManager {
         if let Some(emitter) = emitter {
             for terminal_id in exited_terminal_ids {
                 emit_terminal_exit_event(emitter, &terminal_id);
+                notify_wake_scheduler(&wake_scheduler, &terminal_id, None);
+            }
+        } else {
+            for terminal_id in exited_terminal_ids {
+                notify_wake_scheduler(&wake_scheduler, &terminal_id, None);
             }
         }
 
@@ -486,6 +511,8 @@ fn read_loop(
     terminal_id: String,
     emitter: &EventEmitter,
     terminals: &Arc<Mutex<HashMap<String, TerminalInstance>>>,
+    wake_scheduler: &Arc<Mutex<Option<Arc<crate::wake_scheduler::WakeScheduler>>>>,
+    runtime_handle: Option<tokio::runtime::Handle>,
 ) {
     let output_event = format!("terminal://output/{}", terminal_id);
     let mut buf = [0u8; 8192];
@@ -511,6 +538,25 @@ fn read_loop(
     }
 
     emit_terminal_exit_event(emitter, &terminal_id);
+    notify_wake_scheduler(wake_scheduler, &terminal_id, runtime_handle);
+}
+
+fn notify_wake_scheduler(
+    scheduler: &Arc<Mutex<Option<Arc<crate::wake_scheduler::WakeScheduler>>>>,
+    terminal_id: &str,
+    runtime_handle: Option<tokio::runtime::Handle>,
+) {
+    let Some(scheduler) = scheduler.lock().unwrap().clone() else {
+        return;
+    };
+    let terminal_id = terminal_id.to_owned();
+    let Some(handle) = runtime_handle.or_else(|| tokio::runtime::Handle::try_current().ok()) else {
+        tracing::warn!(terminal_id, "[wake] no runtime available for process-exit wake");
+        return;
+    };
+    handle.spawn(async move {
+        scheduler.on_process_exit(&terminal_id).await;
+    });
 }
 
 fn emit_terminal_exit_event(emitter: &EventEmitter, terminal_id: &str) {

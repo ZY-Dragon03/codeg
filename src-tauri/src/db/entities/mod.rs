@@ -1,4 +1,5 @@
 pub mod agent_setting;
+pub mod agent_wake;
 pub mod app_metadata;
 pub mod automation;
 pub mod automation_run;

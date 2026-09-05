@@ -101,3 +101,9 @@ Existing target offline 时只允许按原 external_id/agent_type/folder 恢复�
 ## Migration Plan
 
 先交付 settled-success producer、stable resolver、durable chain/decision receiver 和 capability；Existing reviewer 最小验收可先跑。再接 AutomationConfig New target，最后实验模板。所有新模板默认关闭；禁用保留日志。Wake Scheduler 独立，不是阻塞依赖。本轮仅设计。
+
+### Current product boundary and exact guards (2026-09-06)
+
+Phase 1 does not expose reviewer chain fields in EventRuleEditor. Completion forwarding to an existing conversation is the available primitive; reviewer decisions remain a later consumer of the same send/read executor.
+
+The allowed-target policy is snapshotted at chain creation as explicit conversation ids and/or an opted-in folder scope plus the source/current worker allowance. Every dispatch revalidates the target identity and policy; policy narrowing, deletion or out-of-scope targets STOP without fallback or spawn. `max_iterations` starts at completed=0 and increments exactly once for each unique reviewer turn that settles successfully, including a settled turn with a missing decision (which then STOPs). ACP error/cancel and duplicate completion do not increment it. Before every automatic dispatch, `next_depth = depth + 1` MUST satisfy `next_depth <= max_chain_depth`. Hard guards save requested/effective decision and override reason.

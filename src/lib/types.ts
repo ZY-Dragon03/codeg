@@ -1552,22 +1552,38 @@ export type EventRuleConditionKind =
   | "contains"
   | "regex"
   | "error_kind"
+export type EventRuleContentSource = "ai_output" | "error" | "both"
+export interface EventRuleUserMessageIgnoreRule {
+  kind: "exact" | "contains" | "regex"
+  value: string
+}
 export interface EventRuleCondition {
   kind: EventRuleConditionKind
+  source?: EventRuleContentSource
   match_mode: "any" | "all"
   text_contains?: string[]
   regex?: string | null
   error_kind?: string | null
+  error_severity?: string | null
+  error_title?: string | null
+  error_details?: string | null
 }
 export interface EventRuleAction {
   kind: "send_to_conversation"
   conversation_ref: "source_conversation" | "specific_conversation"
   conversation_id?: number | null
   prompt: string
+  target_conversation_ids?: number[]
+  include_source_context?: boolean
+  include_recent_user_message?: boolean
+  include_final_report?: boolean
+  additional_prompt?: string | null
+  recent_user_message_ignore_rules?: EventRuleUserMessageIgnoreRule[]
 }
 export interface EventRuleConfig {
+  automation_type?: "content_detection" | "forward_after_task_completion"
   scope: EventRuleScope
-  trigger: "turn_failed"
+  trigger: "turn_failed" | "content_matched" | "turn_completed"
   condition: EventRuleCondition
   action: EventRuleAction
   guard: { max_attempts: number; cooldown_ms: number }
@@ -1595,6 +1611,7 @@ export interface EventRulePreview {
   resolved_target_id: number | null
   target_exists: boolean
   target_available: boolean
+  target_availability?: Record<string, boolean>
   winner_rule_id: number | null
   draft_is_winner: boolean
   draft_is_shadowed: boolean

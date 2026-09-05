@@ -244,6 +244,47 @@ pub struct BrokerCreateWorkTaskRequest {
     pub spec: NewWorkTaskSpec,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerSendToConversationRequest {
+    pub token: String,
+    pub conversation_id: i32,
+    pub prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerReadConversationContextRequest {
+    pub token: String,
+    pub conversation_id: i32,
+    #[serde(default)]
+    pub max_messages: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerWakeRequest {
+    pub token: String,
+    pub trigger_kind: String,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    pub terminal_id: Option<String>,
+    #[serde(default)]
+    pub process_ref: Option<String>,
+    pub prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerListWakesRequest {
+    pub token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerCancelWakeRequest {
+    pub token: String,
+    pub wake_id: i32,
+}
+
 /// Tagged top-level message dispatched by the listener. Adding new variants
 /// is the wire-stable way to grow the broker protocol without touching the
 /// frame layer.
@@ -263,6 +304,11 @@ pub enum BrokerMessage {
     TaskComplete(BrokerTaskCompleteRequest),
     CreateAutomation(BrokerCreateAutomationRequest),
     CreateWorkTask(BrokerCreateWorkTaskRequest),
+    SendToConversation(BrokerSendToConversationRequest),
+    ReadConversationContext(BrokerReadConversationContextRequest),
+    Wake(BrokerWakeRequest),
+    ListWakes(BrokerListWakesRequest),
+    CancelWake(BrokerCancelWakeRequest),
 }
 
 /// The wrapped outcome the main process returns over the same socket.
@@ -453,6 +499,41 @@ pub async fn client_create_work_task_round_trip(
     req: &BrokerCreateWorkTaskRequest,
 ) -> io::Result<BrokerResponse> {
     message_round_trip(socket_path, &BrokerMessage::CreateWorkTask(req.clone())).await
+}
+
+pub async fn client_send_to_conversation_round_trip(
+    socket_path: &str,
+    req: &BrokerSendToConversationRequest,
+) -> io::Result<BrokerResponse> {
+    message_round_trip(socket_path, &BrokerMessage::SendToConversation(req.clone())).await
+}
+
+pub async fn client_read_conversation_context_round_trip(
+    socket_path: &str,
+    req: &BrokerReadConversationContextRequest,
+) -> io::Result<BrokerResponse> {
+    message_round_trip(socket_path, &BrokerMessage::ReadConversationContext(req.clone())).await
+}
+
+pub async fn client_wake_round_trip(
+    socket_path: &str,
+    req: &BrokerWakeRequest,
+) -> io::Result<BrokerResponse> {
+    message_round_trip(socket_path, &BrokerMessage::Wake(req.clone())).await
+}
+
+pub async fn client_list_wakes_round_trip(
+    socket_path: &str,
+    req: &BrokerListWakesRequest,
+) -> io::Result<BrokerResponse> {
+    message_round_trip(socket_path, &BrokerMessage::ListWakes(req.clone())).await
+}
+
+pub async fn client_cancel_wake_round_trip(
+    socket_path: &str,
+    req: &BrokerCancelWakeRequest,
+) -> io::Result<BrokerResponse> {
+    message_round_trip(socket_path, &BrokerMessage::CancelWake(req.clone())).await
 }
 
 /// Total budget for `open()` retries on Windows named pipes. Has to be

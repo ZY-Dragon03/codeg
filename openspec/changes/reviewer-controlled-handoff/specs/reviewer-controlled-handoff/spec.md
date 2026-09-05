@@ -98,3 +98,33 @@ hard guard 覆盖 reviewer 决定时 MUST 同时保存 requested_decision、effe
 #### Scenario: 离线目标无法原身份恢复
 - **WHEN** backend 无法恢复指定 existing conversation
 - **THEN** 系统 MUST 记录 target_unavailable 并停止，不重新创建会话
+
+### Requirement: Allowed targets MUST be frozen and rechecked
+
+Chain creation MUST save explicit conversation ids and/or an opted-in folder scope as an allowed-target policy snapshot. Each dynamic dispatch MUST re-read the target identity and revalidate that policy. A narrowed policy, deleted or out-of-scope target MUST STOP; selector filtering MUST NOT replace dispatch validation and the system MUST NOT broaden the policy or spawn a fallback.
+
+
+#### Scenario: Contract is observable
+
+- **WHEN** the product receives the event or request described by this requirement
+- **THEN** the system MUST apply the requirement and expose its result in the response or structured log
+
+### Requirement: Iteration and depth counters MUST be exact
+
+`completed_iterations` starts at zero and increments once for each unique reviewer turn that settles successfully. A settled turn with a missing or invalid decision increments once and then defaults to STOP. ACP error/cancel, duplicate completion, tool calls and ordinary human turns do not increment. Before an automatic dispatch, `next_depth = depth + 1` MUST be no greater than `max_chain_depth`; reaching the limit consumes the current result but creates no next action.
+
+
+#### Scenario: Contract is observable
+
+- **WHEN** the product receives the event or request described by this requirement
+- **THEN** the system MUST apply the requirement and expose its result in the response or structured log
+
+### Requirement: Guard overrides MUST retain requested and effective decisions
+
+When a reviewer requests CONTINUE but a hard guard forces EXIT/STOP, the chain state and execution log MUST retain `requested_decision=continue`, `effective_decision=exit` and the guard reason (for example `max_iterations`).
+
+
+#### Scenario: Contract is observable
+
+- **WHEN** the product receives the event or request described by this requirement
+- **THEN** the system MUST apply the requirement and expose its result in the response or structured log

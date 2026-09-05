@@ -1,6 +1,7 @@
 //! Event rules engine: subscribe to ACP bus, match rules, send follow-up prompts.
 
 use std::collections::HashMap;
+use regex::Regex;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -18,7 +19,8 @@ use crate::db::AppDatabase;
 use crate::event_rules::dedup::turn_failure_dedup_key;
 use crate::event_rules::matcher::match_rules;
 use crate::event_rules::types::{
-    ActionKind, ConversationRef, LifecycleEvent, LifecycleTrigger, ParsedEventRule,
+    ActionKind, ConversationRef, LifecycleEvent, LifecycleTrigger,
+    ParsedEventRule,
 };
 use crate::logging::throttle::{LagLogThrottle, LAG_LOG_WINDOW};
 
@@ -55,6 +57,15 @@ struct PendingTurnFailure {
     agent_type: String,
     error_kind: Option<String>,
     text: String,
+    error_severity: Option<String>,
+    error_title: Option<String>,
+    error_details: Option<String>,
+    /// Main-thread assistant output accumulated from ContentDelta. This is
+    /// retained until TurnComplete so a streaming match can never dispatch
+    /// before the connection is idle.
+    assistant_text: String,
+    /// The user prompt for the current turn, used by completion payloads.
+    user_messages: Vec<String>,
     failure_record_id: Option<String>,
     /// True when a terminal AIR `SessionFailure` (severity `"error"`) was seen.
     terminal_failure: bool,
@@ -161,6 +172,15 @@ impl EventRulesEngine {
                 self.merge_turn_error(env, message, code.as_deref(), details.as_deref())
                     .await;
             }
+            AcpEvent::ContentDelta {
+                text,
+                parent_tool_use_id: None,
+            } => {
+                self.merge_assistant_delta(env, text).await;
+            }
+            AcpEvent::UserMessage { blocks, .. } => {
+                self.merge_user_message(env, blocks).await;
+            }
             AcpEvent::TurnComplete {
                 session_id,
                 stop_reason,
@@ -170,6 +190,82 @@ impl EventRulesEngine {
             }
             _ => {}
         }
+    }
+
+    async fn merge_assistant_delta(&self, env: &EventEnvelope, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        let Some((conversation_id, folder_id, agent_type, turn_marker)) =
+            self.resolve_conversation_context(&env.connection_id).await
+        else {
+            return;
+        };
+        let mut pending = self.pending_failures.lock().await;
+        let entry = pending
+            .entry(env.connection_id.clone())
+            .or_insert_with(|| PendingTurnFailure {
+                turn_marker,
+                conversation_id,
+                folder_id,
+                agent_type: agent_type.clone(),
+                error_kind: None,
+                text: String::new(),
+                error_severity: None,
+                error_title: None,
+                error_details: None,
+                assistant_text: String::new(),
+                user_messages: Vec::new(),
+                failure_record_id: None,
+                terminal_failure: false,
+            });
+        entry.turn_marker = turn_marker;
+        entry.conversation_id = conversation_id;
+        entry.folder_id = folder_id;
+        entry.agent_type = agent_type;
+        entry.assistant_text.push_str(text);
+    }
+
+    async fn merge_user_message(
+        &self,
+        env: &EventEnvelope,
+        blocks: &[crate::acp::types::UserMessageBlock],
+    ) {
+        let Some((conversation_id, folder_id, agent_type, turn_marker)) =
+            self.resolve_conversation_context(&env.connection_id).await
+        else {
+            return;
+        };
+        let message = blocks
+            .iter()
+            .filter_map(|block| match block {
+                crate::acp::types::UserMessageBlock::Text { text } => Some(text.as_str()),
+                crate::acp::types::UserMessageBlock::Image { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if message.is_empty() {
+            return;
+        }
+        let mut pending = self.pending_failures.lock().await;
+        let entry = pending
+            .entry(env.connection_id.clone())
+            .or_insert_with(|| PendingTurnFailure {
+                turn_marker,
+                conversation_id,
+                folder_id,
+                agent_type: agent_type.clone(),
+                error_kind: None,
+                text: String::new(),
+                error_severity: None,
+                error_title: None,
+                error_details: None,
+                assistant_text: String::new(),
+                user_messages: Vec::new(),
+                failure_record_id: None,
+                terminal_failure: false,
+            });
+        entry.user_messages.push(message);
     }
 
     async fn merge_session_failure(&self, env: &EventEnvelope, record: &SessionFailureRecord) {
@@ -190,6 +286,11 @@ impl EventRulesEngine {
                     agent_type: agent_type.clone(),
                     error_kind: None,
                     text: String::new(),
+                    error_severity: None,
+                    error_title: None,
+                    error_details: None,
+                        assistant_text: String::new(),
+                    user_messages: Vec::new(),
                     failure_record_id: None,
                     terminal_failure: false,
                 });
@@ -200,6 +301,9 @@ impl EventRulesEngine {
         merge_error_kind(&mut entry.error_kind, Some(record.category.clone()));
         append_failure_text(&mut entry.text, &text);
         entry.failure_record_id = Some(record.id.clone());
+        entry.error_severity = Some(record.severity.clone());
+        append_optional_text(&mut entry.error_title, Some(&record.title));
+        append_optional_text(&mut entry.error_details, record.details.as_deref());
         entry.terminal_failure = true;
     }
 
@@ -230,6 +334,11 @@ impl EventRulesEngine {
                     agent_type: agent_type.clone(),
                     error_kind: None,
                     text: String::new(),
+                    error_severity: None,
+                    error_title: None,
+                    error_details: None,
+                        assistant_text: String::new(),
+                    user_messages: Vec::new(),
                     failure_record_id: None,
                     terminal_failure: false,
                 });
@@ -239,6 +348,9 @@ impl EventRulesEngine {
         entry.turn_marker = turn_marker;
         merge_error_kind(&mut entry.error_kind, kind);
         append_failure_text(&mut entry.text, &text);
+        append_optional_text(&mut entry.error_title, Some(message));
+        append_optional_text(&mut entry.error_details, details);
+        entry.terminal_failure = true;
     }
 
     async fn on_turn_complete(
@@ -253,21 +365,37 @@ impl EventRulesEngine {
             .await
             .remove(&env.connection_id);
 
-        if stop_reason == "end_turn" && !pending.as_ref().is_some_and(|p| p.terminal_failure) {
-            if let Some((conversation_id, _, _, _)) =
-                self.resolve_conversation_context(&env.connection_id).await
-            {
-                let _ = event_rule_service::reset_attempts_for_conversation(
-                    &self.db.conn,
-                    conversation_id,
-                )
-                .await;
-            }
-            return;
-        }
-
         let Some(pending) = pending else {
             if stop_reason == "end_turn" {
+                if let Some((conversation_id, folder_id, agent_type, turn_marker)) =
+                    self.resolve_conversation_context(&env.connection_id).await
+                {
+                    let _ = event_rule_service::reset_attempts_for_conversation(
+                        &self.db.conn,
+                        conversation_id,
+                    )
+                    .await;
+                    self.maybe_handle_lifecycle_event(LifecycleEvent {
+                        connection_id: env.connection_id.clone(),
+                        conversation_id,
+                        folder_id,
+                        agent_type,
+                        trigger: LifecycleTrigger::TurnCompleted,
+                        error_kind: None,
+                        text: String::new(),
+                        assistant_text: None,
+                        error_text: None,
+                        error_severity: None,
+                        error_title: None,
+                        error_details: None,
+                        recent_user_message: None,
+                        recent_user_messages: Vec::new(),
+                        turn_session_id: format!("{session_id}#{turn_marker}"),
+                        failure_record_id: None,
+                        dedup_key: format!("turn_completed:{conversation_id}:{turn_marker}"),
+                    })
+                    .await;
+                }
                 return;
             }
             if !is_automatic_failure_stop_reason(stop_reason) {
@@ -289,6 +417,13 @@ impl EventRulesEngine {
                 trigger: LifecycleTrigger::TurnFailed,
                 error_kind: Some(map_stop_reason_to_kind(stop_reason)),
                 text: text.clone(),
+                assistant_text: None,
+                error_text: Some(text.clone()),
+                error_severity: None,
+                error_title: Some(text.clone()),
+                error_details: None,
+                recent_user_message: None,
+                recent_user_messages: Vec::new(),
                 turn_session_id: format!("{session_id}#{turn_marker}"),
                 failure_record_id: None,
                 dedup_key: turn_failure_dedup_key(
@@ -302,14 +437,72 @@ impl EventRulesEngine {
             return;
         };
 
+        if stop_reason == "end_turn" && !pending.terminal_failure {
+            let completed_conversation_id = pending.conversation_id;
+            let completed_turn_marker = pending.turn_marker;
+            let completed_agent_type = pending.agent_type.clone();
+            let completed_report = pending.assistant_text.clone();
+            let _ = event_rule_service::reset_attempts_for_conversation(
+                &self.db.conn,
+                completed_conversation_id,
+            )
+            .await;
+            let event = LifecycleEvent {
+                connection_id: env.connection_id.clone(),
+                conversation_id: completed_conversation_id,
+                folder_id: pending.folder_id,
+                agent_type: completed_agent_type,
+                trigger: LifecycleTrigger::TurnCompleted,
+                error_kind: None,
+                text: completed_report,
+                assistant_text: Some(pending.assistant_text.clone()).filter(|v| !v.trim().is_empty()),
+                error_text: None,
+                error_severity: None,
+                error_title: None,
+                error_details: None,
+                recent_user_message: pending.user_messages.last().cloned().filter(|v| !v.trim().is_empty()),
+                recent_user_messages: pending.user_messages.clone(),
+                turn_session_id: format!("{session_id}#{completed_turn_marker}"),
+                failure_record_id: None,
+                dedup_key: format!(
+                    "turn_completed:{}:{}",
+                    completed_conversation_id, completed_turn_marker
+                ),
+            };
+            if !event.text.trim().is_empty() {
+                let mut content_event = event.clone();
+                content_event.trigger = LifecycleTrigger::ContentMatched;
+                content_event.dedup_key = format!(
+                    "content_matched:{}:{}",
+                    completed_conversation_id, completed_turn_marker
+                );
+                self.maybe_handle_lifecycle_event(content_event).await;
+            }
+            self.maybe_handle_lifecycle_event(event).await;
+            return;
+        }
+
         let event = LifecycleEvent {
             connection_id: env.connection_id.clone(),
             conversation_id: pending.conversation_id,
             folder_id: pending.folder_id,
-            agent_type: pending.agent_type,
+            agent_type: pending.agent_type.clone(),
             trigger: LifecycleTrigger::TurnFailed,
-            error_kind: pending.error_kind,
-            text: pending.text.clone(),
+            error_kind: pending.error_kind.clone(),
+            text: if pending.assistant_text.is_empty() {
+                pending.text.clone()
+            } else if pending.text.is_empty() {
+                pending.assistant_text.clone()
+            } else {
+                format!("{}\n{}", pending.text, pending.assistant_text)
+            },
+            assistant_text: Some(pending.assistant_text.clone()).filter(|v| !v.trim().is_empty()),
+            error_text: Some(pending.text.clone()).filter(|v| !v.trim().is_empty()),
+            error_severity: pending.error_severity.clone(),
+            error_title: pending.error_title.clone(),
+            error_details: pending.error_details.clone(),
+            recent_user_message: pending.user_messages.last().cloned().filter(|v| !v.trim().is_empty()),
+            recent_user_messages: pending.user_messages.clone(),
             turn_session_id: format!("{session_id}#{marker}", marker = pending.turn_marker),
             failure_record_id: pending.failure_record_id.clone(),
             dedup_key: turn_failure_dedup_key(
@@ -319,6 +512,15 @@ impl EventRulesEngine {
                 &pending.text,
             ),
         };
+        if !event.text.trim().is_empty() {
+            let mut content_event = event.clone();
+            content_event.trigger = LifecycleTrigger::ContentMatched;
+            content_event.dedup_key = format!(
+                "content_matched:{}:{}",
+                pending.conversation_id, pending.turn_marker
+            );
+            self.maybe_handle_lifecycle_event(content_event).await;
+        }
         self.maybe_handle_lifecycle_event(event).await;
     }
 
@@ -379,6 +581,7 @@ impl EventRulesEngine {
             ConversationRef::SourceConversation => Some(event.conversation_id),
             ConversationRef::SpecificConversation => rule.config.action.conversation_id,
         };
+        let trigger_name = lifecycle_trigger_name(&event.trigger);
         match self
             .reserve_attempt_with_retry(
                 rule.id,
@@ -396,7 +599,7 @@ impl EventRulesEngine {
                     resolved_target_id: configured_target_id,
                     status: "skipped",
                     detail: Some(format!("cooldown_ms={}", guard.cooldown_ms)),
-                    trigger: "turn_failed",
+                    trigger: trigger_name,
                     action: "send_to_conversation",
                     prompt_snapshot: rule.config.action.prompt.clone(),
                     guard_reason: Some("skipped_cooldown"),
@@ -416,7 +619,7 @@ impl EventRulesEngine {
                     resolved_target_id: configured_target_id,
                     status: "skipped",
                     detail: Some(format!("max_attempts={}", guard.max_attempts)),
-                    trigger: "turn_failed",
+                    trigger: trigger_name,
                     action: "send_to_conversation",
                     prompt_snapshot: rule.config.action.prompt.clone(),
                     guard_reason: Some("skipped_max_attempts"),
@@ -435,39 +638,46 @@ impl EventRulesEngine {
             }
         }
 
-        if let Err(e) = self.execute_send_to_conversation(rule, &event).await {
-            tracing::warn!(
-                "[event_rules] rule {} failed for conversation {}: {e}",
-                rule.id,
-                event.conversation_id
-            );
+        let mut targets = rule.config.action.target_conversation_ids.clone();
+        if let Some(target) = configured_target_id {
+            if !targets.contains(&target) {
+                targets.insert(0, target);
+            }
+        }
+        if targets.is_empty() {
+            targets.push(event.conversation_id);
+        }
+        let prompt = render_action_prompt(&rule.config.action, &event);
+        for target_id in targets {
+            let result = self
+                .execute_send_to_conversation(rule, &event, target_id)
+                .await;
+            let (status, detail) = match result {
+                Ok(()) => ("fired", Some(event.text.chars().take(200).collect())),
+                Err(error) => {
+                    tracing::error!(
+                        "[event_rules] rule {} failed for target {} in conversation {}: {}",
+                        rule.id,
+                        target_id,
+                        event.conversation_id,
+                        error
+                    );
+                    ("failed", Some(error))
+                }
+            };
             self.append_execution_log_with_retry(ExecutionLogDraft {
                 rule_id: rule.id,
                 source_conversation_id: event.conversation_id,
-                resolved_target_id: configured_target_id,
-                status: "failed",
-                detail: Some(e),
-                trigger: "turn_failed",
+                resolved_target_id: Some(target_id),
+                status,
+                detail,
+                trigger: trigger_name,
                 action: "send_to_conversation",
-                prompt_snapshot: rule.config.action.prompt.clone(),
+                prompt_snapshot: prompt.clone(),
                 guard_reason: None,
             })
             .await;
-            return;
         }
-
-        self.append_execution_log_with_retry(ExecutionLogDraft {
-            rule_id: rule.id,
-            source_conversation_id: event.conversation_id,
-            resolved_target_id: configured_target_id,
-            status: "fired",
-            detail: Some(event.text.chars().take(200).collect()),
-            trigger: "turn_failed",
-            action: "send_to_conversation",
-            prompt_snapshot: rule.config.action.prompt.clone(),
-            guard_reason: None,
-        })
-        .await;
         tracing::info!(
             "[event_rules] rule {} sent follow-up to conversation {}",
             rule.id,
@@ -543,14 +753,15 @@ impl EventRulesEngine {
         &self,
         rule: &ParsedEventRule,
         event: &LifecycleEvent,
+        target_id: i32,
     ) -> Result<(), String> {
         let action = &rule.config.action;
         if !matches!(action.kind, ActionKind::SendToConversation) {
             return Err("unsupported action".into());
         }
         let (conversation_id, folder_id) =
-            resolve_conversation_target(&self.db.conn, action, event).await?;
-        let prompt = action.prompt.clone();
+            resolve_conversation_target_id(&self.db.conn, target_id).await?;
+        let prompt = render_action_prompt(action, event);
         let blocks = vec![PromptInputBlock::Text { text: prompt }];
 
         let conn_id = match action.conversation_ref {
@@ -559,8 +770,10 @@ impl EventRulesEngine {
             // source action must continue the exact turn that emitted the
             // lifecycle event rather than whichever connection the manager's
             // conversation lookup happens to return first.
-            ConversationRef::SourceConversation => event.connection_id.clone(),
-            ConversationRef::SpecificConversation => {
+            ConversationRef::SourceConversation if target_id == event.conversation_id => {
+                event.connection_id.clone()
+            }
+            ConversationRef::SourceConversation | ConversationRef::SpecificConversation => {
                 if let Some(id) = self
                     .manager
                     .find_eligible_connection_by_conversation_id(conversation_id)
@@ -615,41 +828,81 @@ fn is_automatic_failure_stop_reason(reason: &str) -> bool {
     matches!(reason, "unknown" | "empty" | "refusal" | "max_tokens" | "max_turn_requests")
 }
 
-async fn resolve_conversation_target(
+async fn resolve_conversation_target_id(
     db: &sea_orm::DatabaseConnection,
+    conversation_id: i32,
+) -> Result<(i32, i32), String> {
+    let target = crate::db::entities::conversation::Entity::find_by_id(conversation_id)
+        .one(db)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("target conversation {conversation_id} not found"))?;
+    if target.deleted_at.is_some() {
+        return Err(format!("target conversation {conversation_id} is deleted"));
+    }
+    Ok((target.id, target.folder_id))
+}
+
+fn lifecycle_trigger_name(trigger: &LifecycleTrigger) -> &'static str {
+    match trigger {
+        LifecycleTrigger::TurnFailed => "turn_failed",
+        LifecycleTrigger::ContentMatched => "content_matched",
+        LifecycleTrigger::TurnCompleted => "turn_completed",
+    }
+}
+
+fn render_action_prompt(
     action: &crate::event_rules::types::RuleAction,
     event: &LifecycleEvent,
-) -> Result<(i32, i32), String> {
-    match action.conversation_ref {
-        ConversationRef::SourceConversation => {
-            let source =
-                crate::db::entities::conversation::Entity::find_by_id(event.conversation_id)
-                    .one(db)
-                    .await
-                    .map_err(|e| e.to_string())?
-                    .ok_or_else(|| {
-                        format!("source conversation {} not found", event.conversation_id)
-                    })?;
-            if source.deleted_at.is_some() {
-                return Err("source conversation is deleted".into());
-            }
-            Ok((source.id, source.folder_id))
-        }
-        ConversationRef::SpecificConversation => {
-            let cid = action
-                .conversation_id
-                .ok_or_else(|| "missing conversation_id".to_string())?;
-            let target = crate::db::entities::conversation::Entity::find_by_id(cid)
-                .one(db)
-                .await
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| format!("target conversation {cid} not found"))?;
-            if target.deleted_at.is_some() {
-                return Err(format!("target conversation {cid} is deleted"));
-            }
-            Ok((cid, target.folder_id))
+) -> String {
+    let mut sections = Vec::new();
+    if action.include_source_context {
+        sections.push(format!(
+            "Source conversation: {} (folder {}, agent {})",
+            event.conversation_id, event.folder_id, event.agent_type
+        ));
+    }
+    if action.include_final_report && !event.text.trim().is_empty() {
+        sections.push(format!("Agent report:\n{}", event.text.trim()));
+    }
+    if action.include_recent_user_message {
+        if let Some(message) = find_recent_valid_user_message(
+            &event.recent_user_messages,
+            &action.recent_user_message_ignore_rules,
+        ) {
+            sections.push(format!("Recent valid user message:\n{}", message.trim()));
         }
     }
+    if let Some(extra) = action.additional_prompt.as_deref().filter(|v| !v.trim().is_empty()) {
+        sections.push(extra.trim().to_owned());
+    }
+    if sections.is_empty() {
+        action.prompt.clone()
+    } else if action.prompt.trim().is_empty() {
+        sections.join("\n\n")
+    } else {
+        format!("{}\n\n{}", action.prompt.trim(), sections.join("\n\n"))
+    }
+}
+
+fn find_recent_valid_user_message(
+    messages: &[String],
+    ignore_rules: &[crate::event_rules::types::UserMessageIgnoreRule],
+) -> Option<String> {
+    messages
+        .iter()
+        .rev()
+        .map(|message| message.trim())
+        .filter(|message| !message.is_empty())
+        .find(|message| {
+            !ignore_rules.iter().any(|rule| match rule.kind.to_ascii_lowercase().as_str() {
+                "exact" => message == &rule.value.trim(),
+                "contains" => message.contains(rule.value.trim()),
+                "regex" => Regex::new(&rule.value).map(|re| re.is_match(message)).unwrap_or(false),
+                _ => false,
+            })
+        })
+        .map(str::to_owned)
 }
 
 fn failure_text(record: &SessionFailureRecord) -> String {
@@ -673,6 +926,20 @@ fn append_failure_text(existing: &mut String, incoming: &str) {
         existing.push('\n');
     }
     existing.push_str(incoming);
+}
+
+fn append_optional_text(existing: &mut Option<String>, incoming: Option<&str>) {
+    let Some(incoming) = incoming.filter(|value| !value.is_empty()) else {
+        return;
+    };
+    match existing {
+        None => *existing = Some(incoming.to_owned()),
+        Some(current) if !current.contains(incoming) => {
+            current.push('\n');
+            current.push_str(incoming);
+        }
+        Some(_) => {}
+    }
 }
 
 fn merge_error_kind(existing: &mut Option<String>, incoming: Option<String>) {
@@ -754,24 +1021,35 @@ mod tests {
 
     async fn enable_tls_auto_resume_rule(db: &crate::db::AppDatabase) -> i32 {
         use crate::event_rules::types::{
-            ActionKind, ConditionKind, ContainsMatchMode, ConversationRef, EventRuleConfig,
+            ActionKind, AutomationType, ConditionKind, ContainsMatchMode, ConversationRef, EventRuleConfig,
             LifecycleTrigger, RuleAction, RuleCondition, RuleGuard,
         };
         let config = EventRuleConfig {
+            automation_type: AutomationType::ContentDetection,
             scope: Default::default(),
             trigger: LifecycleTrigger::TurnFailed,
             condition: RuleCondition {
                 kind: ConditionKind::Contains,
+                source: Default::default(),
                 match_mode: ContainsMatchMode::Any,
                 text_contains: vec!["RetriableError".into(), "TLS".into()],
                 regex: None,
                 error_kind: None,
+            error_severity: None,
+            error_title: None,
+            error_details: None,
             },
             action: RuleAction {
                 kind: ActionKind::SendToConversation,
                 conversation_ref: ConversationRef::SourceConversation,
                 conversation_id: None,
                 prompt: "继续".into(),
+                target_conversation_ids: vec![],
+                include_source_context: false,
+                include_recent_user_message: false,
+                include_final_report: false,
+                additional_prompt: None,
+                recent_user_message_ignore_rules: vec![],
             },
             guard: RuleGuard {
                 max_attempts: 3,
@@ -807,6 +1085,44 @@ mod tests {
         active.update(&db.conn).await.expect("enable").id
     }
 
+    async fn insert_test_rule(
+        db: &crate::db::AppDatabase,
+        config: crate::event_rules::types::EventRuleConfig,
+        name: &str,
+    ) -> i32 {
+        let now = chrono::Utc::now();
+        event_rule::ActiveModel {
+            name: Set(name.to_owned()),
+            enabled: Set(true),
+            priority: Set(500),
+            builtin_key: Set(None),
+            config: Set(serde_json::to_string(&config).unwrap()),
+            created_at: Set(now),
+            updated_at: Set(now),
+            ..Default::default()
+        }
+        .insert(&db.conn)
+        .await
+        .expect("insert test event rule")
+        .id
+    }
+
+    fn send_action(prompt: &str) -> crate::event_rules::types::RuleAction {
+        use crate::event_rules::types::{ActionKind, ConversationRef, RuleAction};
+        RuleAction {
+            kind: ActionKind::SendToConversation,
+            conversation_ref: ConversationRef::SourceConversation,
+            conversation_id: None,
+            prompt: prompt.to_owned(),
+            target_conversation_ids: vec![],
+            include_source_context: false,
+            include_recent_user_message: false,
+            include_final_report: false,
+            additional_prompt: None,
+            recent_user_message_ignore_rules: vec![],
+        }
+    }
+
     fn tls_failure_event(conv_id: i32, folder_id: i32, session_id: &str) -> LifecycleEvent {
         let text: String = "Error: RetriableError: [aborted] Client network socket disconnected before secure TLS connection was established".into();
         LifecycleEvent {
@@ -817,6 +1133,13 @@ mod tests {
             trigger: LifecycleTrigger::TurnFailed,
             error_kind: Some("connection".into()),
             text: text.clone(),
+            assistant_text: None,
+            error_text: Some(text.clone()),
+            error_severity: None,
+            error_title: None,
+            error_details: None,
+            recent_user_message: None,
+            recent_user_messages: Vec::new(),
             turn_session_id: session_id.into(),
             failure_record_id: Some("air-fail-1".into()),
             dedup_key: turn_failure_dedup_key(conv_id, session_id, Some("air-fail-1"), &text),
@@ -1248,7 +1571,7 @@ mod tests {
     #[tokio::test]
     async fn specific_target_chooses_idle_identity_matching_connection() {
         use crate::event_rules::types::{
-            ActionKind, ConditionKind, ContainsMatchMode, ConversationRef, EventRuleConfig,
+            ActionKind, AutomationType, ConditionKind, ContainsMatchMode, ConversationRef, EventRuleConfig,
             LifecycleTrigger, RuleAction, RuleCondition, RuleGuard,
         };
 
@@ -1258,20 +1581,31 @@ mod tests {
         let target_id = seed_conversation(&db, folder_id, AgentType::Cursor).await;
         let now = chrono::Utc::now();
         let config = EventRuleConfig {
+            automation_type: AutomationType::ContentDetection,
             scope: Default::default(),
             trigger: LifecycleTrigger::TurnFailed,
             condition: RuleCondition {
                 kind: ConditionKind::None,
+                source: Default::default(),
                 match_mode: ContainsMatchMode::All,
                 text_contains: vec![],
                 regex: None,
                 error_kind: None,
+            error_severity: None,
+            error_title: None,
+            error_details: None,
             },
             action: RuleAction {
                 kind: ActionKind::SendToConversation,
                 conversation_ref: ConversationRef::SpecificConversation,
                 conversation_id: Some(target_id),
                 prompt: "specific".into(),
+                target_conversation_ids: vec![],
+                include_source_context: false,
+                include_recent_user_message: false,
+                include_final_report: false,
+                additional_prompt: None,
+                recent_user_message_ignore_rules: vec![],
             },
             guard: RuleGuard {
                 max_attempts: 3,
@@ -1364,6 +1698,281 @@ mod tests {
         }
 
         assert_eq!(drain_prompt_texts(&mut cmd_rx), vec!["继续", "继续"]);
+    }
+
+    #[tokio::test]
+    async fn streaming_content_match_waits_for_turn_settle() {
+        use crate::event_rules::types::{
+            AutomationType, ConditionKind, ContainsMatchMode, EventRuleConfig, LifecycleTrigger,
+            RuleCondition, RuleGuard,
+        };
+        let db = fresh_in_memory_db().await;
+        let folder_id = seed_folder(&db, "/tmp/streaming-match").await;
+        let conversation_id = seed_conversation(&db, folder_id, AgentType::Cursor).await;
+        insert_test_rule(
+            &db,
+            EventRuleConfig {
+                automation_type: AutomationType::ContentDetection,
+                scope: Default::default(),
+                trigger: LifecycleTrigger::ContentMatched,
+                condition: RuleCondition {
+                    kind: ConditionKind::Contains,
+                    source: crate::event_rules::types::ContentSource::AiOutput,
+                    match_mode: ContainsMatchMode::Any,
+                    text_contains: vec!["needle".into()],
+                    regex: None,
+                    error_kind: None,
+                    error_severity: None,
+                    error_title: None,
+                    error_details: None,
+                },
+                action: send_action("follow up"),
+                guard: RuleGuard {
+                    max_attempts: 3,
+                    cooldown_ms: 0,
+                },
+            },
+            "streaming content",
+        )
+        .await;
+        let manager = ConnectionManager::new();
+        let mut cmd_rx =
+            insert_live_connection(&manager, "conn-stream", conversation_id, folder_id).await;
+        let engine = Arc::new(EventRulesEngine::new(
+            db,
+            manager,
+            Arc::new(InternalEventBus::new(Arc::new(EventBusMetrics::default()))),
+        ));
+        engine.reload_rules().await.unwrap();
+        engine
+            .on_envelope(&EventEnvelope {
+                seq: 1,
+                connection_id: "conn-stream".into(),
+                payload: AcpEvent::ContentDelta {
+                    text: "needle appears while streaming".into(),
+                    parent_tool_use_id: None,
+                },
+            })
+            .await;
+        assert!(drain_prompt_texts(&mut cmd_rx).is_empty());
+        engine
+            .on_envelope(&EventEnvelope {
+                seq: 2,
+                connection_id: "conn-stream".into(),
+                payload: AcpEvent::TurnComplete {
+                    session_id: "stream-session".into(),
+                    stop_reason: "end_turn".into(),
+                    agent_type: "cursor".into(),
+                },
+            })
+            .await;
+        assert_eq!(drain_prompt_texts(&mut cmd_rx), vec!["follow up"]);
+    }
+
+    #[tokio::test]
+    async fn completion_forwarding_uses_only_end_turn_and_current_report() {
+        use crate::event_rules::types::{
+            AutomationType, ConditionKind, ContainsMatchMode, EventRuleConfig, LifecycleTrigger,
+            RuleCondition, RuleGuard,
+        };
+        let db = fresh_in_memory_db().await;
+        let folder_id = seed_folder(&db, "/tmp/completion-forward").await;
+        let conversation_id = seed_conversation(&db, folder_id, AgentType::Cursor).await;
+        let mut action = send_action("audit");
+        action.include_final_report = true;
+        insert_test_rule(
+            &db,
+            EventRuleConfig {
+                automation_type: AutomationType::ForwardAfterTaskCompletion,
+                scope: Default::default(),
+                trigger: LifecycleTrigger::TurnCompleted,
+                condition: RuleCondition {
+                    kind: ConditionKind::None,
+                    source: Default::default(),
+                    match_mode: ContainsMatchMode::Any,
+                    text_contains: vec![],
+                    regex: None,
+                    error_kind: None,
+                    error_severity: None,
+                    error_title: None,
+                    error_details: None,
+                },
+                action,
+                guard: RuleGuard {
+                    max_attempts: 3,
+                    cooldown_ms: 0,
+                },
+            },
+            "completion forwarding",
+        )
+        .await;
+        let manager = ConnectionManager::new();
+        let mut cmd_rx =
+            insert_live_connection(&manager, "conn-complete", conversation_id, folder_id).await;
+        let engine = Arc::new(EventRulesEngine::new(
+            db,
+            manager,
+            Arc::new(InternalEventBus::new(Arc::new(EventBusMetrics::default()))),
+        ));
+        engine.reload_rules().await.unwrap();
+        engine
+            .on_envelope(&EventEnvelope {
+                seq: 1,
+                connection_id: "conn-complete".into(),
+                payload: AcpEvent::ContentDelta {
+                    text: "current turn report".into(),
+                    parent_tool_use_id: None,
+                },
+            })
+            .await;
+        engine
+            .on_envelope(&EventEnvelope {
+                seq: 2,
+                connection_id: "conn-complete".into(),
+                payload: AcpEvent::TurnComplete {
+                    session_id: "complete-session".into(),
+                    stop_reason: "end_turn".into(),
+                    agent_type: "cursor".into(),
+                },
+            })
+            .await;
+        let prompts = drain_prompt_texts(&mut cmd_rx);
+        assert_eq!(prompts.len(), 1);
+        assert!(prompts[0].contains("current turn report"));
+
+        let db = fresh_in_memory_db().await;
+        let folder_id = seed_folder(&db, "/tmp/completion-failure").await;
+        let conversation_id = seed_conversation(&db, folder_id, AgentType::Cursor).await;
+        let mut action = send_action("audit");
+        action.include_final_report = true;
+        insert_test_rule(
+            &db,
+            EventRuleConfig {
+                automation_type: AutomationType::ForwardAfterTaskCompletion,
+                scope: Default::default(),
+                trigger: LifecycleTrigger::TurnCompleted,
+                condition: RuleCondition {
+                    kind: ConditionKind::None,
+                    source: Default::default(),
+                    match_mode: ContainsMatchMode::Any,
+                    text_contains: vec![],
+                    regex: None,
+                    error_kind: None,
+                    error_severity: None,
+                    error_title: None,
+                    error_details: None,
+                },
+                action,
+                guard: RuleGuard {
+                    max_attempts: 3,
+                    cooldown_ms: 0,
+                },
+            },
+            "completion failure excluded",
+        )
+        .await;
+        let manager = ConnectionManager::new();
+        let mut cmd_rx =
+            insert_live_connection(&manager, "conn-failure", conversation_id, folder_id).await;
+        let engine = Arc::new(EventRulesEngine::new(
+            db,
+            manager,
+            Arc::new(InternalEventBus::new(Arc::new(EventBusMetrics::default()))),
+        ));
+        engine.reload_rules().await.unwrap();
+        engine
+            .on_envelope(&EventEnvelope {
+                seq: 1,
+                connection_id: "conn-failure".into(),
+                payload: AcpEvent::TurnComplete {
+                    session_id: "failure-session".into(),
+                    stop_reason: "unknown".into(),
+                    agent_type: "cursor".into(),
+                },
+            })
+            .await;
+        assert!(drain_prompt_texts(&mut cmd_rx).is_empty());
+    }
+
+    #[tokio::test]
+    async fn recent_user_message_uses_last_non_ignored_candidate() {
+        use crate::event_rules::types::{
+            AutomationType, ConditionKind, ContainsMatchMode, EventRuleConfig, LifecycleTrigger,
+            RuleCondition, RuleGuard, UserMessageIgnoreRule,
+        };
+        let db = fresh_in_memory_db().await;
+        let folder_id = seed_folder(&db, "/tmp/recent-user").await;
+        let conversation_id = seed_conversation(&db, folder_id, AgentType::Cursor).await;
+        let mut action = send_action("audit");
+        action.include_recent_user_message = true;
+        action.recent_user_message_ignore_rules = vec![UserMessageIgnoreRule {
+            kind: "exact".into(),
+            value: "继续".into(),
+        }];
+        insert_test_rule(
+            &db,
+            EventRuleConfig {
+                automation_type: AutomationType::ForwardAfterTaskCompletion,
+                scope: Default::default(),
+                trigger: LifecycleTrigger::TurnCompleted,
+                condition: RuleCondition {
+                    kind: ConditionKind::None,
+                    source: Default::default(),
+                    match_mode: ContainsMatchMode::Any,
+                    text_contains: vec![],
+                    regex: None,
+                    error_kind: None,
+                    error_severity: None,
+                    error_title: None,
+                    error_details: None,
+                },
+                action,
+                guard: RuleGuard {
+                    max_attempts: 3,
+                    cooldown_ms: 0,
+                },
+            },
+            "recent valid user",
+        )
+        .await;
+        let manager = ConnectionManager::new();
+        let mut cmd_rx =
+            insert_live_connection(&manager, "conn-user", conversation_id, folder_id).await;
+        let engine = Arc::new(EventRulesEngine::new(
+            db,
+            manager,
+            Arc::new(InternalEventBus::new(Arc::new(EventBusMetrics::default()))),
+        ));
+        engine.reload_rules().await.unwrap();
+        for (seq, message) in [(1, "继续"), (2, "继续"), (3, "真实任务")] {
+            engine
+                .on_envelope(&EventEnvelope {
+                    seq,
+                    connection_id: "conn-user".into(),
+                    payload: AcpEvent::UserMessage {
+                        message_id: format!("m{seq}"),
+                        blocks: vec![crate::acp::types::UserMessageBlock::Text {
+                            text: message.into(),
+                        }],
+                    },
+                })
+                .await;
+        }
+        engine
+            .on_envelope(&EventEnvelope {
+                seq: 4,
+                connection_id: "conn-user".into(),
+                payload: AcpEvent::TurnComplete {
+                    session_id: "user-session".into(),
+                    stop_reason: "end_turn".into(),
+                    agent_type: "cursor".into(),
+                },
+            })
+            .await;
+        let prompts = drain_prompt_texts(&mut cmd_rx);
+        assert_eq!(prompts.len(), 1);
+        assert!(prompts[0].contains("真实任务"));
+        assert!(!prompts[0].contains("Recent valid user message:\n继续"));
     }
 
     #[test]

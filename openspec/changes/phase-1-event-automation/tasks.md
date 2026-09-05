@@ -21,3 +21,10 @@
 ## 4. Stop
 
 本轮文档收口后停止，以上实施任务保持未完成。automation-extensions-* 不自动启动。
+
+## 5. Current product implementation queue
+
+- [x] 5.1 Port settled content/completion/failure semantics and multi-target execution on the current upstream base.
+- [x] 5.2 Implement authorized send/read tools and the shared wake scheduler; verify persistence, restart recovery and one-shot idempotency.
+- [x] 5.3 Deliver menu/editor/preview/log UX with native locale parity and real conversation isolation.
+- [x] 5.4 Record CODE_PROVEN, TEST_PROVEN and RUNTIME_PROVEN separately; do not infer Desktop/Web runtime proof from static tests or OpenSpec validation. (Desktop release visual/restart evidence remains UNKNOWN_NOT_PROVEN; no release build was run by instruction.)

@@ -20,3 +20,8 @@
 - [ ] 3.2 接 chain 状态/stop/log，验证 requested decision 与 effective action/guard reason 同时可审计。
 - [ ] 3.3 使用 Existing reviewer 跑最小闭环，再结合 event-automation-spawn-agent 跑 New reviewer，验证消息数与身份。
 - [ ] 3.4 Desktop/Web 及支持的 Cursor/Codex/ACP 逐项记录实际 tool/JSON 能力与闭环证据；未验证标 UNKNOWN_NOT_PROVEN。
+
+## 4. Product boundary confirmations
+
+- [ ] 4.1 Keep the existing reviewer protocol as a later consumer of completion forwarding plus send/read tools; do not redesign Phase 1 UI.
+- [ ] 4.2 Persist and recheck the allowed-target policy, exact iteration/depth semantics, fail-closed missing decisions and requested/effective overrides.

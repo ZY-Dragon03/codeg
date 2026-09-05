@@ -362,23 +362,28 @@ async fn async_main() -> ExitCode {
     // through the broker. Path is PID-scoped, so the listener owns it for
     // the lifetime of the process.
     {
-        let listener = codeg_lib::acp::delegation::listener::DelegationListener::new(
-            delegation_broker,
-            delegation_tokens,
+        let parent_lookup: Arc<dyn codeg_lib::acp::delegation::listener::ParentSessionLookup> =
             Arc::new(codeg_lib::acp::manager::ConnectionManagerParentLookup {
                 manager: Arc::new(state.connection_manager.clone_ref()),
-            }),
+            });
+        let session_info_lookup: Arc<dyn codeg_lib::acp::session_info::SessionInfoAccess> =
+            Arc::new(codeg_lib::commands::session_info::DbSessionInfoLookup::new(
+                Arc::new(codeg_lib::db::AppDatabase {
+                    conn: state.db.conn.clone(),
+                }),
+            ));
+        let tokens = delegation_tokens.clone();
+        let listener = codeg_lib::acp::delegation::listener::DelegationListener::new(
+            delegation_broker,
+            tokens.clone(),
+            parent_lookup.clone(),
             Arc::new(codeg_lib::acp::manager::ConnectionManagerFeedbackLookup {
                 manager: Arc::new(state.connection_manager.clone_ref()),
             }),
             Arc::new(codeg_lib::acp::manager::ConnectionManagerQuestionLookup {
                 manager: Arc::new(state.connection_manager.clone_ref()),
             }),
-            Arc::new(codeg_lib::commands::session_info::DbSessionInfoLookup::new(
-                Arc::new(codeg_lib::db::AppDatabase {
-                    conn: state.db.conn.clone(),
-                }),
-            )),
+            session_info_lookup.clone(),
             Arc::new(codeg_lib::work_task::EngineWorkTaskTools),
             Arc::new(codeg_lib::commands::chat_authoring::DbChatAuthoring::new(
                 Arc::new(codeg_lib::db::AppDatabase {
@@ -388,8 +393,20 @@ async fn async_main() -> ExitCode {
                 chat_authoring_config.clone(),
             )),
         );
+        let event_automation = Arc::new(
+            codeg_lib::acp::delegation::listener::ConnectionEventAutomationAccess {
+                db: codeg_lib::db::AppDatabase {
+                    conn: state.db.conn.clone(),
+                },
+                manager: state.connection_manager.clone_ref(),
+                tokens,
+                parent_lookup,
+                session_info: session_info_lookup,
+            },
+        );
         let socket = delegation_socket_path.clone();
         tokio::spawn(async move {
+            listener.set_event_automation(event_automation).await;
             if let Err(e) = listener.run(socket).await {
                 tracing::info!("[delegation] listener exited: {e}");
             }
@@ -506,6 +523,17 @@ async fn async_main() -> ExitCode {
     ) {
         tokio::spawn(codeg_lib::automation::run_automation_engine(engine));
     }
+
+    let wake_scheduler = codeg_lib::wake_scheduler::WakeScheduler::new(
+        codeg_lib::db::AppDatabase {
+            conn: state.db.conn.clone(),
+        },
+        state.connection_manager.clone_ref(),
+    );
+    state
+        .terminal_manager
+        .set_wake_scheduler(wake_scheduler.clone());
+    tokio::spawn(wake_scheduler.run());
 
     // Work-task engine (mirrors lib.rs setup): manual pipeline, event-bus
     // settlement, merging git-truth recovery. One per process.

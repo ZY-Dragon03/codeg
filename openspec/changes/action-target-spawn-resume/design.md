@@ -22,3 +22,7 @@
 ## Migration Plan
 
 保留 1A 历史完成记录；1B 修正目标验证后接 UI；3 加 alias/reconnect 和 spawn（实现归 event-automation-spawn-agent），chain 归 reviewer-controlled-handoff。本轮不实现。
+
+### Phase 1 target policy and shared executor (2026-09-06)
+
+The Phase 1 allowed-target policy is the source conversation plus explicitly selected existing conversation ids. The selection is persisted as a policy snapshot, but every dispatch re-reads target identity (conversation, folder, agent type, deletion state) and rechecks that policy. A narrowed policy, deleted target, busy target or offline target produces a visible per-target failure and never broadens the policy, changes target or spawns a session. `target_exists` and `runtime_available` are separate facts. Candidate connection selection is Connected + idle + identity matching; map iteration order is not a resolver.

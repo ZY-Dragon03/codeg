@@ -4,7 +4,7 @@ use crate::db::error::DbError;
 use crate::db::service::event_rule_service;
 use crate::db::AppDatabase;
 use crate::event_rules::matcher::{condition_matches, scope_matches};
-use crate::event_rules::types::{LifecycleEvent, LifecycleTrigger};
+use crate::event_rules::types::LifecycleEvent;
 use crate::event_rules::EventRulesEngineHandle;
 use crate::models::{EventRuleDraft, EventRuleInfo};
 use chrono::{DateTime, Utc};
@@ -98,6 +98,18 @@ async fn validate_authoritative(db: &AppDatabase, draft: &EventRuleDraft) -> Res
             ));
         }
     }
+    for id in &draft.config.action.target_conversation_ids {
+        let ok = crate::db::entities::conversation::Entity::find_by_id(*id)
+            .filter(crate::db::entities::conversation::Column::DeletedAt.is_null())
+            .one(&db.conn)
+            .await?
+            .is_some();
+        if !ok {
+            return Err(DbError::Validation(format!(
+                "target conversation {id} does not exist or is deleted"
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -152,9 +164,16 @@ pub async fn event_rule_preview_core(
         conversation_id: row.id,
         folder_id: row.folder_id,
         agent_type: row.agent_type,
-        trigger: LifecycleTrigger::TurnFailed,
+        trigger: draft.config.trigger.clone(),
         error_kind: sample.error_kind,
         text: sample.text,
+        assistant_text: None,
+        error_text: None,
+        error_severity: None,
+        error_title: None,
+        error_details: None,
+        recent_user_message: None,
+        recent_user_messages: Vec::new(),
         turn_session_id: String::new(),
         failure_record_id: None,
         dedup_key: String::new(),
@@ -425,7 +444,8 @@ mod tests {
     use crate::db::test_helpers::{fresh_in_memory_db, seed_conversation, seed_folder};
     use crate::db::AppDatabase;
     use crate::event_rules::types::{
-        ActionKind, ConditionKind, ContainsMatchMode, ConversationRef, EventRuleConfig,
+        ActionKind, AutomationType, ConditionKind, ContainsMatchMode, ConversationRef,
+        EventRuleConfig,
         LifecycleTrigger, RuleAction, RuleCondition, RuleGuard,
     };
     use crate::event_rules::{EventRulesEngine, EventRulesEngineHandle};
@@ -437,21 +457,32 @@ mod tests {
             enabled: false,
             priority: 500,
             config: EventRuleConfig {
+                automation_type: AutomationType::ContentDetection,
                 scope: crate::event_rules::types::RuleScope::Conversation { conversation_id },
                 trigger: LifecycleTrigger::TurnFailed,
                 condition: RuleCondition {
                     kind: ConditionKind::Contains,
+                source: Default::default(),
                     match_mode: ContainsMatchMode::Any,
                     text_contains: vec!["MY_CUSTOM_ERROR_123".into()],
                     regex: None,
                     error_kind: None,
-                },
+            error_severity: None,
+            error_title: None,
+            error_details: None,
+            },
                 action: RuleAction {
                     kind: ActionKind::SendToConversation,
                     conversation_ref: ConversationRef::SourceConversation,
                     conversation_id: None,
                     prompt: "custom recovery".into(),
-                },
+                target_conversation_ids: vec![],
+                include_source_context: false,
+                include_recent_user_message: false,
+                include_final_report: false,
+                additional_prompt: None,
+                recent_user_message_ignore_rules: vec![],
+            },
                 guard: RuleGuard { max_attempts: 3, cooldown_ms: 0 },
             },
         }
@@ -476,21 +507,32 @@ mod tests {
             enabled: true,
             priority: 50,
             config: EventRuleConfig {
+                automation_type: AutomationType::ContentDetection,
                 scope: Default::default(),
                 trigger: LifecycleTrigger::TurnFailed,
                 condition: RuleCondition {
                     kind: ConditionKind::None,
+                source: Default::default(),
                     match_mode: ContainsMatchMode::All,
                     text_contains: vec![],
                     regex: None,
                     error_kind: None,
-                },
+            error_severity: None,
+            error_title: None,
+            error_details: None,
+            },
                 action: RuleAction {
                     kind: ActionKind::SendToConversation,
                     conversation_ref: ConversationRef::SourceConversation,
                     conversation_id: None,
                     prompt: "继续".into(),
-                },
+                target_conversation_ids: vec![],
+                include_source_context: false,
+                include_recent_user_message: false,
+                include_final_report: false,
+                additional_prompt: None,
+                recent_user_message_ignore_rules: vec![],
+            },
                 guard: RuleGuard {
                     max_attempts: 3,
                     cooldown_ms: 5000,

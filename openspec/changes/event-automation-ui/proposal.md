@@ -22,3 +22,11 @@
 ## Impact
 
 Automations/Conversation UI、types/api/transport、event rule scope/校验/预览/日志双模式 core。属于 Phase 1B；本轮仅设计。
+
+## Product model revision (2026-09-06)
+
+The Event Automations menu is the primary product surface. It searches all rules and sorts enabled rules first, then rules applying to the current conversation, priority descending and id ascending. Creation has exactly two types: **Content detection** and **Forward after task completion**. There is no template library as the primary creation flow.
+
+Content detection selects AI output, error, or both; supports Contains ANY/ALL, Regex, structured error category/severity/title/details and text matching; streaming can mark a match but dispatch waits for settle. Forwarding uses only `TurnComplete(stop_reason=end_turn)`, freezes the just-completed assistant report, and never treats cancellation/refusal/failure as completion.
+
+An action may contain the source conversation and one or more existing conversation targets. Each target has an independent intent, receipt and log; the UI presents title/agent/folder and never asks for raw ids. Payload toggles control source context, recent valid user message, final report and an additional prompt. Recent valid user messages skip editable Exact/Contains/Regex ignore rules, defaulting to “继续” and “continue”.

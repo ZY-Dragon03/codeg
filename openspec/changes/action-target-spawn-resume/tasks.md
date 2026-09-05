@@ -25,3 +25,9 @@
 ## Phase 3 原身份恢复
 
 - [ ] 4.1 复用 ACP resume 恢复既有 conversation，验证 external_id/agent_type/folder 一致；无法恢复时可见停止，无新 conversation。
+
+## 5. Current shared target execution
+
+- [x] 5.1 Replace arbitrary connection lookup with Connected + idle + identity matching resolution and add multi-connection tests.
+- [x] 5.2 Add per-target intent/receipt/error/idempotency for fan-out sends.
+- [x] 5.3 Expose authorized send/read tool contracts and structured target availability errors; keep spawn and reviewer aliases Phase 3.

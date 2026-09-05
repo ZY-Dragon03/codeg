@@ -1,6 +1,7 @@
 #![allow(unused_imports)]
 
 pub use super::agent_setting::Entity as AgentSetting;
+pub use super::agent_wake::Entity as AgentWake;
 pub use super::app_metadata::Entity as AppMetadata;
 pub use super::automation::Entity as Automation;
 pub use super::automation_run::Entity as AutomationRun;

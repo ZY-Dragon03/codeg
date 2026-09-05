@@ -34,3 +34,9 @@
 - 阶段一仅需 `send_to_conversation` + `source_conversation`
 
 Phase 1B 在公开 source/specific selector 前必须验证目标 DB 身份/folder/deleted/busy/offline。Existing 不允许失败后自动 spawn；Phase 3 加 parent/spawned alias 及保持身份的 reconnect。动态 reviewer target 复用这些引用，不以 Agent 类型代替已有 conversation。
+
+## Product model revision (2026-09-06)
+
+Phase 1 actions are existing-conversation sends. A rule may fan out to the source and multiple explicit existing conversation ids. The shared executor resolves each target independently, records intent/receipt/error independently, and deduplicates by turn + rule + target. A database row existing is not runtime availability: dispatch must choose a Connected, idle, identity-matching connection and must not use the first HashMap entry or fall back to spawn.
+
+The same resolver/executor is used by Event Automations, MCP send tools and Wake. MCP `send_to_conversation` and read-context calls are authorized only for the current automation/context allowed target set and return structured busy/offline/deleted errors. Spawn, parent and spawned aliases remain Phase 3 capabilities and are not prerequisites for the current product.

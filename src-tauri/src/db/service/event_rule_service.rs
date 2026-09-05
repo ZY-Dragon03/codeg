@@ -311,27 +311,39 @@ mod tests {
     use super::*;
     use crate::db::test_helpers::{fresh_in_memory_db, seed_conversation, seed_folder};
     use crate::event_rules::types::{
-        ActionKind, ConditionKind, ContainsMatchMode, ConversationRef, LifecycleTrigger,
+        ActionKind, AutomationType, ConditionKind, ContainsMatchMode, ConversationRef,
+        LifecycleTrigger,
         RuleAction, RuleCondition, RuleGuard,
     };
     use crate::models::agent::AgentType;
 
     async fn seed_rule(db: &crate::db::AppDatabase) -> i32 {
         let config = EventRuleConfig {
+            automation_type: AutomationType::ContentDetection,
             scope: Default::default(),
             trigger: LifecycleTrigger::TurnFailed,
             condition: RuleCondition {
                 kind: ConditionKind::None,
+                source: Default::default(),
                 match_mode: ContainsMatchMode::All,
                 text_contains: vec![],
                 regex: None,
                 error_kind: None,
+            error_severity: None,
+            error_title: None,
+            error_details: None,
             },
             action: RuleAction {
                 kind: ActionKind::SendToConversation,
                 conversation_ref: ConversationRef::SourceConversation,
                 conversation_id: None,
                 prompt: "继续".into(),
+                target_conversation_ids: vec![],
+                include_source_context: false,
+                include_recent_user_message: false,
+                include_final_report: false,
+                additional_prompt: None,
+                recent_user_message_ignore_rules: vec![],
             },
             guard: RuleGuard {
                 max_attempts: 3,

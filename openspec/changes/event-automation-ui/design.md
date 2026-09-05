@@ -52,3 +52,11 @@ Phase 1 的重启验收仅覆盖配置/模板/attempt 持久化。当前 engine.
 ## Migration Plan
 
 先后端兼容默认值及校验/日志，再接 UI。保留旧配置、enabled、guard；回滚停用新增功能、保留数据。按 roadmap 八项验收，不运行本轮 implementation。
+
+### Product UX contract (2026-09-06)
+
+Phase 1 exposes content detection and settled completion forwarding in one editor; Spawn/Reviewer remain later extensions. The default editor is simple: enabled, natural-language trigger, contains ANY/ALL and keywords, prompt, max attempts, cooldown, test and save. Rule name, priority, scope variants, regex, structured error fields and multi-target details are under Advanced and round-trip without loss.
+
+All Event Automation copy, validation, preview, logs, badges and confirmations comes from the ten existing next-intl locales with equal key sets. Built-in rules have a stable `builtin_key`, a localized name and built-in badge; startup or migration MUST NOT overwrite edits or enabled state. Preview is a no-side-effect “Test rule” result in human language, with technical ids in a collapsed details area. Logs map fired/skipped/failed and guard reasons to human text while retaining prompt snapshot and source/target identity.
+
+When a header has no persisted conversation id, its Event Automation button is disabled with an explanatory tooltip; global creation remains available. Scope and target display title, folder and agent labels; internal ids are stored and shown only in technical details. Current conversation views label global, folder and agent-type rules as inherited and show only rules actually applying to that conversation.

@@ -47,3 +47,33 @@ Wake 触发时系统 MUST 仅向已有会话发送 follow-up，MUST NOT spawn �
 
 - **WHEN** 同一个 Wake 已经消费并发布生命周期事件
 - **THEN** 系统 MUST NOT 因观察到该事件再次执行同一 Wake 的 send
+
+### Requirement: Wake registration MUST be authenticated and identity-bound
+
+Only an authenticated companion for the current source conversation may create or cancel its wakes. `prompt` MUST be non-empty; durations and timestamps MUST be valid and future-facing. Process-exit registration MUST include a stable terminal/process identity; the scheduler MUST reject a “most recent terminal” guess.
+
+
+#### Scenario: Contract is observable
+
+- **WHEN** the product receives the event or request described by this requirement
+- **THEN** the system MUST apply the requirement and expose its result in the response or structured log
+
+### Requirement: Wake persistence MUST be restart-safe and idempotent
+
+Each row MUST retain `wake_id`, source conversation identity, trigger, prompt, scheduled time/process identity, status and receipt/error. Pending due timers MUST be recovered on restart and claimed with a compare-and-set transition so a one-shot is consumed at most once. Target unavailable/deleted/busy failures remain attached to the original target and MUST NOT spawn.
+
+
+#### Scenario: Contract is observable
+
+- **WHEN** the product receives the event or request described by this requirement
+- **THEN** the system MUST apply the requirement and expose its result in the response or structured log
+
+### Requirement: Wake and lifecycle observation MUST share execution
+
+All wake sends MUST use the shared existing-target resolver/executor and structured logs. Publishing `terminal_exited` or `timer_fired` MUST NOT cause the same wake to dispatch a second time.
+
+
+#### Scenario: Contract is observable
+
+- **WHEN** the product receives the event or request described by this requirement
+- **THEN** the system MUST apply the requirement and expose its result in the response or structured log

@@ -25,3 +25,7 @@
 阶段二在 turn-failed 之后；发布 `terminal_exited` / `timer_fired` 事件
 
 先完成 Phase 1B 用户可配置产品再按价值交付 Wake。Wake 是 terminal/timer producer 的依赖，**不是 reviewer-controlled-handoff 的硬依赖**；reviewer 只需 settled-success producer、稳定目标和决策/chain 状态。Wake 绑定的持久化身份以 conversation_id 为准，connection_id 仅运行时句柄。
+
+### Durable wake contract (2026-09-06)
+
+Registration requires an authenticated companion bound to the source conversation; callers cannot self-report another source id. Process-exit wakes require a stable terminal/process identity and are rejected when only a “recent terminal” guess is available. Timer rows transition with a compare and set operation from pending to dispatching to sent/failed, carry a wake id in logs, and are recovered on restart when due. The scheduler consumes one-shot rows exactly once and publishes an observation event without re-dispatching the same wake. Missing/deleted/offline/busy targets are visible failures and never spawn or change target.

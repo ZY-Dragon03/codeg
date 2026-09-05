@@ -31,3 +31,7 @@
 ## Impact
 
 实施将涉及 EventRulesEngine、transport API、AutomationsPage、ConversationDetailHeader。本轮仅规划；保留用户未提交源码改动，不 apply/build release/PR/merge/push。
+
+## Product model revision (2026-09-06)
+
+The fixed Phase 1 product includes both Content detection and Forward after task completion, settled report/recent-user extraction, multi-target existing conversation delivery, authorized send/read tools and the shared action executor. Wake is implemented from its existing OpenSpec after the event backend and uses that executor; it is not a second send system. Reviewer orchestration remains a later consumer and is not redesigned or required for Phase 1.

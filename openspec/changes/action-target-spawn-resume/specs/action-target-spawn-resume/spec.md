@@ -49,3 +49,43 @@
 
 - **WHEN** 使用 spawned_agent_conversation
 - **THEN** 系统 MUST 解析指定 chain action 的新会话 receipt，MUST NOT 选择最近打开的 agent
+
+### Requirement: Phase 1 MUST resolve existing targets by identity and availability
+
+For source or explicit existing targets, the executor MUST re-read the conversation row and choose a Connected, idle connection whose conversation, folder and agent identity match. A DB row existing MUST NOT be reported as runtime available. Busy, offline and deleted targets MUST return structured per-target errors and MUST NOT fall back to spawn or another HashMap entry.
+
+
+#### Scenario: Contract is observable
+
+- **WHEN** the product receives the event or request described by this requirement
+- **THEN** the system MUST apply the requirement and expose its result in the response or structured log
+
+### Requirement: Multi-target actions MUST have independent receipts
+
+One action MAY contain multiple existing targets. Each target MUST have its own intent, dispatch receipt, error and idempotency key `(turn_id, rule_id, target_id)`, so a partial success cannot be hidden by another target.
+
+
+#### Scenario: Contract is observable
+
+- **WHEN** the product receives the event or request described by this requirement
+- **THEN** the system MUST apply the requirement and expose its result in the response or structured log
+
+### Requirement: MCP send/read access MUST be authorized
+
+`send_to_conversation(conversation_id,prompt)` and read-context operations MUST accept only targets in the authenticated automation/current-context policy. Unauthorized, deleted, busy and offline targets MUST be structured errors; the tools MUST NOT spawn sessions.
+
+
+#### Scenario: Contract is observable
+
+- **WHEN** the product receives the event or request described by this requirement
+- **THEN** the system MUST apply the requirement and expose its result in the response or structured log
+
+### Requirement: Phase 1 capability boundary MUST be explicit
+
+`send_to_conversation` with source/specific existing references is Phase 1. `spawn_agent`, `parent_conversation` and `spawned_agent_conversation` remain Phase 3 and MUST be rejected as unavailable rather than silently emulated.
+
+
+#### Scenario: Contract is observable
+
+- **WHEN** the product receives the event or request described by this requirement
+- **THEN** the system MUST apply the requirement and expose its result in the response or structured log

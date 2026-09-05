@@ -36,3 +36,55 @@
 
 - **WHEN** 某规则匹配 turn_failed 事件
 - **THEN** 系统 MUST 记录规则 id 与事件 id 的关联
+
+### Requirement: Lifecycle envelope MUST carry stable turn identity
+
+Every settled lifecycle event MUST contain `event_id`, canonical
+`conversation_id`, `folder_id`, `agent_type`, a stable per-turn `turn_id`,
+trigger, stop reason, merged error fields and the final assistant output
+snapshot when available. Connection/session identifiers are runtime metadata;
+an ACP session id MUST NOT identify multiple turns.
+
+#### Scenario: Persistent session has two turns
+
+- **WHEN** one ACP session completes two turns
+- **THEN** the events MUST have different `turn_id` values even though the
+  session id is the same
+
+### Requirement: Failure signals MUST settle and merge before dispatch
+
+`SessionFailure` and `AcpEvent::Error` for one turn MUST merge regardless of
+arrival order. A concrete error kind MUST replace `unknown`; title, details,
+message and text MUST all remain available. The event MUST be emitted only
+after `TurnComplete` has settled the turn.
+
+#### Scenario: Either error arrives first
+
+- **WHEN** SessionFailure then Error, or Error then SessionFailure, arrive for
+  one turn
+- **THEN** one settled `turn_failed` event MUST be emitted with both texts and
+  the concrete error kind
+
+### Requirement: Streaming content MUST never dispatch early
+
+Content matching during `ContentDelta` MAY set a pending match, but MUST NOT
+send a prompt while the turn is in flight. `TurnComplete(stop_reason=end_turn)`
+is the only normal completion trigger; refusal, cancellation and failure are
+not normal completion.
+
+#### Scenario: Match during streaming
+
+- **WHEN** assistant text matches a content rule before the turn settles
+- **THEN** no target receives a message until the settled event is processed
+
+### Requirement: Lifecycle dedup MUST be observable
+
+The engine MUST correlate structured logs with `event_id`/`turn_id` and MUST
+avoid duplicate dispatch for the same turn, rule and target. Cross-restart
+exactly-once remains `UNKNOWN_NOT_PROVEN` unless a durable receipt is added.
+
+
+#### Scenario: Contract is observable
+
+- **WHEN** the product receives the event or request described by this requirement
+- **THEN** the system MUST apply the requirement and expose its result in the response or structured log

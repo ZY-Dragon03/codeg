@@ -67,3 +67,71 @@ TLS 模板 MUST 默认关闭，允许修改条件/prompt/guards，重启 MUST �
 #### Scenario: 关闭规则
 - **WHEN** 用户关闭规则后产生匹配事件
 - **THEN** MUST 不执行该规则，刷新后 MUST 保持关闭
+
+### Requirement: Event menu MUST expose the fixed product model
+
+The menu MUST search all Event Automations and sort by enabled descending, applies-to-current-conversation descending, priority descending and id ascending. Add custom MUST offer exactly Content detection and Forward after task completion; a template library MUST NOT be the primary creation path.
+
+#### Scenario: Current conversation menu
+
+- **WHEN** the menu is opened for conversation C
+- **THEN** it MUST include applicable global/folder/agent/conversation rules, mark inherited rules, and apply the specified stable sort
+
+### Requirement: Content detection MUST settle before dispatch
+
+Content rules MUST select AI output, error or both and support Contains ANY/ALL, Regex and structured error category/severity/title/details plus text matching. A streaming match MAY set pending `matched=true`, but MUST NOT send while the turn is active; the action is evaluated once after settle.
+
+#### Scenario: Streaming assistant match
+
+- **WHEN** a ContentDelta matches during an active turn
+- **THEN** no target receives a message until the turn settles
+
+### Requirement: Completion forwarding MUST use end_turn only
+
+Forward after task completion MUST trigger only on `TurnComplete(stop_reason=end_turn)`. Cancellation, refusal and failure are not completion. The Agent Report is the final assistant text from the just-ended turn, frozen after settle, excluding prior turns, reviewer/tool/reasoning text; empty reports are marked unavailable.
+
+
+#### Scenario: Contract is observable
+
+- **WHEN** the product receives the event or request described by this requirement
+- **THEN** the system MUST apply the requirement and expose its result in the response or structured log
+
+### Requirement: Payload and recent-message extraction MUST be explicit
+
+The editor MUST provide toggles for source conversation info, recent valid user message and final report, plus an additional prompt textarea. Recent valid user message extraction walks backward from the completed turn and skips editable Exact/Contains/Regex ignore rules, defaulting to “继续” and “continue”.
+
+
+#### Scenario: Contract is observable
+
+- **WHEN** the product receives the event or request described by this requirement
+- **THEN** the system MUST apply the requirement and expose its result in the response or structured log
+
+### Requirement: Multi-target forwarding MUST be independently receipted
+
+An action MAY include the source conversation and multiple existing targets. The UI MUST show title/agent/folder instead of raw ids. Each target MUST have an independent intent, receipt and log; partial success MUST remain visible. The same turn/rule/target MUST be idempotent.
+
+
+#### Scenario: Contract is observable
+
+- **WHEN** the product receives the event or request described by this requirement
+- **THEN** the system MUST apply the requirement and expose its result in the response or structured log
+
+### Requirement: Preview and logs MUST describe runtime truth
+
+Preview MUST distinguish `target_exists` from runtime availability and MUST NOT consume guards, send, or write execution logs. Logs MUST preserve source and target titles/ids, prompt snapshot, trigger, action, guard reason and explicit errors such as action-sent/log-write-failed.
+
+
+#### Scenario: Contract is observable
+
+- **WHEN** the product receives the event or request described by this requirement
+- **THEN** the system MUST apply the requirement and expose its result in the response or structured log
+
+### Requirement: UI localization MUST match native Codeg locales
+
+All Event Automation user-facing strings MUST use next-intl and the ten existing locales with identical key sets. Machine values such as trigger and action may appear only in technical details. An unsaved conversation header button MUST be disabled and explain that a first message is required.
+
+
+#### Scenario: Contract is observable
+
+- **WHEN** the product receives the event or request described by this requirement
+- **THEN** the system MUST apply the requirement and expose its result in the response or structured log

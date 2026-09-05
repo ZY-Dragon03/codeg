@@ -53,7 +53,11 @@ use crate::acp::delegation::transport::{
     BrokerCancelTaskRequest, BrokerCommitFeedbackRequest, BrokerCreateAutomationRequest,
     BrokerCreateWorkTaskRequest, BrokerFeedbackRequest, BrokerRequest, BrokerResponse,
     BrokerResumeTaskRequest, BrokerSessionRequest, BrokerStatusRequest,
-    BrokerTaskCompleteRequest, BrokerTaskProgressRequest,
+    BrokerTaskCompleteRequest, BrokerTaskProgressRequest, BrokerSendToConversationRequest,
+    BrokerReadConversationContextRequest, BrokerWakeRequest, BrokerListWakesRequest,
+    BrokerCancelWakeRequest, client_send_to_conversation_round_trip,
+    client_read_conversation_context_round_trip, client_wake_round_trip,
+    client_list_wakes_round_trip, client_cancel_wake_round_trip,
 };
 use crate::acp::question::parse_questions;
 use crate::acp::session_info::MAX_SESSION_MESSAGES;
@@ -204,6 +208,13 @@ impl CompanionFeatures {
             "check_user_feedback" => self.feedback,
             "ask_user_question" => self.ask,
             "get_session_info" => self.sessions,
+            "send_to_conversation" | "read_conversation_context" | "wake_after"
+            | "wake_at" | "wake_on_process_exit" | "list_wakes" | "cancel_wake" => {
+                // These capabilities are part of the authenticated parent
+                // delegation channel. They do not depend on the optional
+                // transcript/session-info toggle.
+                self.delegation
+            }
             "task_progress" | "task_complete" => self.tasks,
             "create_automation" => self.automations,
             "create_work_task" => self.taskboard,
@@ -684,6 +695,80 @@ async fn build_tools_call_spawn(
             let round_trip =
                 Box::pin(async move { client_session_round_trip(&socket, &req).await });
             register_and_spawn(inflight, id, None, round_trip, render_session_result).await
+        }
+        "send_to_conversation" => {
+            let Some(conversation_id) = arguments.get("conversation_id").and_then(Value::as_i64).map(|v| v as i32) else {
+                return LineAction::Respond(err(id, -32602, "send_to_conversation requires integer conversation_id"));
+            };
+            let Some(prompt) = arguments.get("prompt").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) else {
+                return LineAction::Respond(err(id, -32602, "send_to_conversation requires non-empty prompt"));
+            };
+            let req = BrokerSendToConversationRequest {
+                token: ctx.token.clone(),
+                conversation_id,
+                prompt: prompt.to_owned(),
+            };
+            let round_trip = Box::pin(async move {
+                client_send_to_conversation_round_trip(&socket, &req).await
+            });
+            register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
+        }
+        "read_conversation_context" => {
+            let Some(conversation_id) = arguments.get("conversation_id").and_then(Value::as_i64).map(|v| v as i32) else {
+                return LineAction::Respond(err(id, -32602, "read_conversation_context requires integer conversation_id"));
+            };
+            let req = BrokerReadConversationContextRequest {
+                token: ctx.token.clone(),
+                conversation_id,
+                max_messages: Some(parse_max_messages(&arguments)),
+            };
+            let round_trip = Box::pin(async move {
+                client_read_conversation_context_round_trip(&socket, &req).await
+            });
+            register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
+        }
+        "wake_after" | "wake_at" | "wake_on_process_exit" => {
+            let Some(prompt) = arguments.get("prompt").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) else {
+                return LineAction::Respond(err(id, -32602, "wake tool requires non-empty prompt"));
+            };
+            let trigger_kind = match name.as_str() {
+                "wake_after" => "timer_after",
+                "wake_at" => "timer_at",
+                _ => "process_exit",
+            };
+            let duration_ms = arguments.get("duration_ms").and_then(Value::as_u64);
+            let at = arguments
+                .get("at")
+                .and_then(Value::as_str)
+                .and_then(|value| value.parse::<chrono::DateTime<chrono::Utc>>().ok());
+            let terminal_id = arguments.get("terminal_id").and_then(Value::as_str).map(str::to_owned);
+            if trigger_kind == "process_exit" && terminal_id.is_none() {
+                return LineAction::Respond(err(id, -32602, "wake_on_process_exit requires terminal_id"));
+            }
+            let req = BrokerWakeRequest {
+                token: ctx.token.clone(),
+                trigger_kind: trigger_kind.to_owned(),
+                duration_ms,
+                at,
+                terminal_id,
+                process_ref: arguments.get("process_ref").and_then(Value::as_str).map(str::to_owned),
+                prompt: prompt.to_owned(),
+            };
+            let round_trip = Box::pin(async move { client_wake_round_trip(&socket, &req).await });
+            register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
+        }
+        "list_wakes" => {
+            let req = BrokerListWakesRequest { token: ctx.token.clone() };
+            let round_trip = Box::pin(async move { client_list_wakes_round_trip(&socket, &req).await });
+            register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
+        }
+        "cancel_wake" => {
+            let Some(wake_id) = arguments.get("wake_id").and_then(Value::as_i64).map(|v| v as i32) else {
+                return LineAction::Respond(err(id, -32602, "cancel_wake requires integer wake_id"));
+            };
+            let req = BrokerCancelWakeRequest { token: ctx.token.clone(), wake_id };
+            let round_trip = Box::pin(async move { client_cancel_wake_round_trip(&socket, &req).await });
+            register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
         }
         "task_progress" => {
             let message = arguments
@@ -1375,6 +1460,13 @@ pub fn render_session_result(outcome: &Value) -> Value {
     })
 }
 
+/// New event-automation tools already return a structured JSON envelope from
+/// the broker. Keep that envelope intact for MCP clients that understand the
+/// target/receipt fields.
+pub fn render_passthrough(outcome: &Value) -> Value {
+    outcome.clone()
+}
+
 /// Map a `task_progress` / `task_complete` round-trip outcome (a
 /// `{ recorded, note? }` ack) into an MCP `tools/call` result. A report that
 /// could not be attributed (no active work task for this session) is readable
@@ -1623,12 +1715,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tools_list_returns_four_delegation_tools() {
+    async fn tools_list_returns_delegation_and_event_tools() {
         let line = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#;
         let resp = unwrap_respond(dispatch_for_test(line).await);
         let result = resp.result.unwrap();
         let tools = result["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 4);
+        // The delegation capability also exposes the authenticated event
+        // automation tools (send/read/wake/list/cancel) on the same parent
+        // channel.
+        assert_eq!(tools.len(), 11);
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"delegate_to_agent"));
         assert!(names.contains(&"get_delegation_status"));
@@ -2241,7 +2336,7 @@ mod tests {
             dispatch_for_test(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#).await,
         );
         assert!(!names.contains(&"check_user_feedback".to_string()));
-        assert_eq!(names.len(), 4);
+        assert_eq!(names.len(), 11);
     }
 
     #[tokio::test]
@@ -2250,7 +2345,7 @@ mod tests {
             dispatch_with_features(BOTH, r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#).await,
         );
         assert!(names.contains(&"check_user_feedback".to_string()));
-        assert_eq!(names.len(), 5);
+        assert_eq!(names.len(), 12);
     }
 
     #[tokio::test]

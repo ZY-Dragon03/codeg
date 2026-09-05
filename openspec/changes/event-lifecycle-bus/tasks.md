@@ -38,3 +38,14 @@
 - [x] 6.2 将 turn_failed、持久化 CRUD/matcher/send/retry/dedup/settle/hot reload 适配最新接口；target identity 从 DB 解析，验证源码和针对性 Rust 测试。
 - [x] 6.3 通过独立 Phase 1A review，验证未机械覆盖 upstream、时序和跨 folder 身份；所有发现修复后记录复核。
 - [x] 6.4 Desktop/Web 注册及迁移与原有 schema 共存，验证两模式编译及 runtime 迁移。
+
+## 7. Settled product lifecycle (current implementation target)
+
+- [x] 7.1 Add canonical event/turn identity, assistant output and merged
+  structured failure fields to the lifecycle envelope.
+- [x] 7.2 Buffer ContentDelta matches and final report until settle; dispatch
+  only after `TurnComplete(end_turn)` or a settled failure.
+- [x] 7.3 Test SessionFailure/Error merge in both arrival orders, preserving a
+  concrete error kind over `unknown` and retaining all details.
+- [x] 7.4 Add event/rule/target correlation to dedup and structured logs;
+  document cross-restart exactly-once as UNKNOWN_NOT_PROVEN.
