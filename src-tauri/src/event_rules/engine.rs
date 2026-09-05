@@ -31,6 +31,18 @@ const DEDUP_TTL: Duration = Duration::from_secs(30);
 const GUARD_RETRY_BACKOFFS: &[Duration] =
     &[Duration::from_millis(100), Duration::from_millis(500)];
 
+/// CRUD and startup reloads share the same bounded SQLite contention policy as
+/// lifecycle writes. A failed reload must remain visible to its caller; the
+/// retry only absorbs short-lived writer contention.
+const RULE_RELOAD_RETRY_BACKOFFS: &[Duration] =
+    &[Duration::from_millis(100), Duration::from_millis(500)];
+
+/// Logs are written after a guard decision or prompt send. They get a bounded
+/// retry so a transient SQLite lock does not erase the audit receipt, while a
+/// final error is still emitted at ERROR when the action may already have run.
+const EXECUTION_LOG_RETRY_BACKOFFS: &[Duration] =
+    &[Duration::from_millis(100), Duration::from_millis(500)];
+
 /// Pending failure signals are buffered until `TurnComplete` settles the turn.
 /// `emit_with_state` applies `TurnComplete` (clearing `turn_in_flight`) before
 /// broadcasting, so rule actions always run after the turn is settled.
@@ -69,14 +81,40 @@ impl EventRulesEngine {
         }
     }
 
-    pub async fn reload_rules(&self) {
-        match event_rule_service::list_enabled_rules(&self.db.conn).await {
-            Ok(rules) => {
-                tracing::debug!("[event_rules] loaded {} enabled rule(s)", rules.len());
-                *self.rules.lock().await = rules;
+    pub async fn reload_rules(&self) -> Result<(), crate::db::error::DbError> {
+        for attempt in 0..=RULE_RELOAD_RETRY_BACKOFFS.len() {
+            match event_rule_service::list_enabled_rules(&self.db.conn).await {
+                Ok(rules) => {
+                    tracing::debug!("[event_rules] loaded {} enabled rule(s)", rules.len());
+                    *self.rules.lock().await = rules;
+                    return Ok(());
+                }
+                Err(error) if attempt < RULE_RELOAD_RETRY_BACKOFFS.len() => {
+                    let backoff = RULE_RELOAD_RETRY_BACKOFFS[attempt];
+                    tracing::warn!(
+                        "[event_rules] reload failed (attempt {}, retrying in {}ms): {error}",
+                        attempt + 1,
+                        backoff.as_millis()
+                    );
+                    tokio::time::sleep(backoff).await;
+                }
+                Err(error) => {
+                    tracing::error!(
+                        "[event_rules] reload failed after {} attempts: {error}",
+                        attempt + 1
+                    );
+                    return Err(error);
+                }
             }
-            Err(e) => tracing::warn!("[event_rules] reload failed: {e}"),
         }
+        unreachable!("reload loop always returns")
+    }
+
+    pub async fn target_available(&self, conversation_id: i32) -> bool {
+        self.manager
+            .find_eligible_connection_by_conversation_id(conversation_id)
+            .await
+            .is_some()
     }
 
     #[cfg(any(test, feature = "test-utils"))]
@@ -85,7 +123,9 @@ impl EventRulesEngine {
     }
 
     pub async fn run(self: Arc<Self>) {
-        self.reload_rules().await;
+        if let Err(error) = self.reload_rules().await {
+            tracing::error!("[event_rules] initial rule load failed: {error}");
+        }
         let mut rx = self.bus.subscribe();
         let mut lag_throttle = LagLogThrottle::new(LAG_LOG_WINDOW);
         loop {
@@ -157,8 +197,8 @@ impl EventRulesEngine {
         entry.folder_id = folder_id;
         entry.agent_type = agent_type;
         entry.turn_marker = turn_marker;
-        entry.error_kind = Some(record.category.clone());
-        entry.text = text;
+        merge_error_kind(&mut entry.error_kind, Some(record.category.clone()));
+        append_failure_text(&mut entry.text, &text);
         entry.failure_record_id = Some(record.id.clone());
         entry.terminal_failure = true;
     }
@@ -178,13 +218,7 @@ impl EventRulesEngine {
         let kind = code
             .map(map_error_code_to_kind)
             .or_else(|| infer_kind_from_message(message));
-        let mut text = message.to_string();
-        if let Some(d) = details {
-            if !d.is_empty() {
-                text.push('\n');
-                text.push_str(d);
-            }
-        }
+        let text = error_text(message, details);
         let mut pending = self.pending_failures.lock().await;
         let entry =
             pending
@@ -203,15 +237,8 @@ impl EventRulesEngine {
         entry.folder_id = folder_id;
         entry.agent_type = agent_type;
         entry.turn_marker = turn_marker;
-        if entry.error_kind.is_none() {
-            entry.error_kind = kind;
-        }
-        if entry.text.is_empty() {
-            entry.text = text;
-        } else if !entry.text.contains(message) {
-            entry.text.push('\n');
-            entry.text.push_str(message);
-        }
+        merge_error_kind(&mut entry.error_kind, kind);
+        append_failure_text(&mut entry.text, &text);
     }
 
     async fn on_turn_complete(
@@ -363,20 +390,17 @@ impl EventRulesEngine {
         {
             Ok(GuardDecision::Allowed) => {}
             Ok(GuardDecision::Cooldown) => {
-                let _ = event_rule_service::append_execution_log(
-                    &self.db.conn,
-                    ExecutionLogDraft {
-                        rule_id: rule.id,
-                        source_conversation_id: event.conversation_id,
-                        resolved_target_id: configured_target_id,
-                        status: "skipped",
-                        detail: Some(format!("cooldown_ms={}", guard.cooldown_ms)),
-                        trigger: "turn_failed",
-                        action: "send_to_conversation",
-                        prompt_snapshot: rule.config.action.prompt.clone(),
-                        guard_reason: Some("skipped_cooldown"),
-                    },
-                )
+                self.append_execution_log_with_retry(ExecutionLogDraft {
+                    rule_id: rule.id,
+                    source_conversation_id: event.conversation_id,
+                    resolved_target_id: configured_target_id,
+                    status: "skipped",
+                    detail: Some(format!("cooldown_ms={}", guard.cooldown_ms)),
+                    trigger: "turn_failed",
+                    action: "send_to_conversation",
+                    prompt_snapshot: rule.config.action.prompt.clone(),
+                    guard_reason: Some("skipped_cooldown"),
+                })
                 .await;
                 tracing::info!(
                     "[event_rules] rule {} skipped for conversation {} (cooldown)",
@@ -386,20 +410,17 @@ impl EventRulesEngine {
                 return;
             }
             Ok(GuardDecision::MaxAttempts) => {
-                let _ = event_rule_service::append_execution_log(
-                    &self.db.conn,
-                    ExecutionLogDraft {
-                        rule_id: rule.id,
-                        source_conversation_id: event.conversation_id,
-                        resolved_target_id: configured_target_id,
-                        status: "skipped",
-                        detail: Some(format!("max_attempts={}", guard.max_attempts)),
-                        trigger: "turn_failed",
-                        action: "send_to_conversation",
-                        prompt_snapshot: rule.config.action.prompt.clone(),
-                        guard_reason: Some("skipped_max_attempts"),
-                    },
-                )
+                self.append_execution_log_with_retry(ExecutionLogDraft {
+                    rule_id: rule.id,
+                    source_conversation_id: event.conversation_id,
+                    resolved_target_id: configured_target_id,
+                    status: "skipped",
+                    detail: Some(format!("max_attempts={}", guard.max_attempts)),
+                    trigger: "turn_failed",
+                    action: "send_to_conversation",
+                    prompt_snapshot: rule.config.action.prompt.clone(),
+                    guard_reason: Some("skipped_max_attempts"),
+                })
                 .await;
                 tracing::info!(
                     "[event_rules] rule {} reached max_attempts for conversation {}",
@@ -420,38 +441,32 @@ impl EventRulesEngine {
                 rule.id,
                 event.conversation_id
             );
-            let _ = event_rule_service::append_execution_log(
-                &self.db.conn,
-                ExecutionLogDraft {
-                    rule_id: rule.id,
-                    source_conversation_id: event.conversation_id,
-                    resolved_target_id: configured_target_id,
-                    status: "failed",
-                    detail: Some(e),
-                    trigger: "turn_failed",
-                    action: "send_to_conversation",
-                    prompt_snapshot: rule.config.action.prompt.clone(),
-                    guard_reason: None,
-                },
-            )
-            .await;
-            return;
-        }
-
-        let _ = event_rule_service::append_execution_log(
-            &self.db.conn,
-            ExecutionLogDraft {
+            self.append_execution_log_with_retry(ExecutionLogDraft {
                 rule_id: rule.id,
                 source_conversation_id: event.conversation_id,
                 resolved_target_id: configured_target_id,
-                status: "fired",
-                detail: Some(event.text.chars().take(200).collect()),
+                status: "failed",
+                detail: Some(e),
                 trigger: "turn_failed",
                 action: "send_to_conversation",
                 prompt_snapshot: rule.config.action.prompt.clone(),
                 guard_reason: None,
-            },
-        )
+            })
+            .await;
+            return;
+        }
+
+        self.append_execution_log_with_retry(ExecutionLogDraft {
+            rule_id: rule.id,
+            source_conversation_id: event.conversation_id,
+            resolved_target_id: configured_target_id,
+            status: "fired",
+            detail: Some(event.text.chars().take(200).collect()),
+            trigger: "turn_failed",
+            action: "send_to_conversation",
+            prompt_snapshot: rule.config.action.prompt.clone(),
+            guard_reason: None,
+        })
         .await;
         tracing::info!(
             "[event_rules] rule {} sent follow-up to conversation {}",
@@ -498,6 +513,32 @@ impl EventRulesEngine {
         result
     }
 
+    async fn append_execution_log_with_retry(&self, log: ExecutionLogDraft) {
+        let mut result = event_rule_service::append_execution_log(&self.db.conn, log.clone()).await;
+        for (index, backoff) in EXECUTION_LOG_RETRY_BACKOFFS.iter().enumerate() {
+            if result.is_ok() {
+                return;
+            }
+            tracing::warn!(
+                "[event_rules] execution log failed for {} (attempt {}, retrying in {}ms): {}",
+                log.status,
+                index + 1,
+                backoff.as_millis(),
+                result.as_ref().expect_err("checked error")
+            );
+            tokio::time::sleep(*backoff).await;
+            result = event_rule_service::append_execution_log(&self.db.conn, log.clone()).await;
+        }
+        if let Err(error) = result {
+            tracing::error!(
+                "[event_rules] execution log failed after {} attempts for status {}; action may already have been sent: {}",
+                EXECUTION_LOG_RETRY_BACKOFFS.len() + 1,
+                log.status,
+                error
+            );
+        }
+    }
+
     async fn execute_send_to_conversation(
         &self,
         rule: &ParsedEventRule,
@@ -522,7 +563,7 @@ impl EventRulesEngine {
             ConversationRef::SpecificConversation => {
                 if let Some(id) = self
                     .manager
-                    .find_connection_by_conversation_id(conversation_id)
+                    .find_eligible_connection_by_conversation_id(conversation_id)
                     .await
                 {
                     id
@@ -612,9 +653,37 @@ async fn resolve_conversation_target(
 }
 
 fn failure_text(record: &SessionFailureRecord) -> String {
-    match &record.details {
-        Some(d) if !d.is_empty() => format!("{}\n{d}", record.title),
-        _ => record.title.clone(),
+    error_text(&record.title, record.details.as_deref())
+}
+
+fn error_text(message: &str, details: Option<&str>) -> String {
+    match details {
+        Some(details) if !details.is_empty() && details != message => {
+            format!("{message}\n{details}")
+        }
+        _ => message.to_owned(),
+    }
+}
+
+fn append_failure_text(existing: &mut String, incoming: &str) {
+    if incoming.is_empty() || existing.contains(incoming) {
+        return;
+    }
+    if !existing.is_empty() {
+        existing.push('\n');
+    }
+    existing.push_str(incoming);
+}
+
+fn merge_error_kind(existing: &mut Option<String>, incoming: Option<String>) {
+    let Some(incoming) = incoming.filter(|kind| !kind.is_empty()) else {
+        return;
+    };
+    let incoming_unknown = incoming == "unknown";
+    match existing.as_deref() {
+        None => *existing = Some(incoming),
+        Some("unknown") if !incoming_unknown => *existing = Some(incoming),
+        Some(_) => {}
     }
 }
 
@@ -866,7 +935,7 @@ mod tests {
         let bus = Arc::new(InternalEventBus::new(Arc::new(EventBusMetrics::default())));
         let log_conn = db.conn.clone();
         let engine = Arc::new(EventRulesEngine::new(db, mgr.clone_ref(), bus));
-        engine.reload_rules().await;
+        engine.reload_rules().await.unwrap();
 
         let mut prompts = Vec::new();
         for i in 0..3 {
@@ -914,7 +983,7 @@ mod tests {
             mgr,
             Arc::new(InternalEventBus::new(Arc::new(EventBusMetrics::default()))),
         ));
-        engine.reload_rules().await;
+        engine.reload_rules().await.unwrap();
 
         let conn_id = "conn-dedup";
         engine
@@ -955,6 +1024,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pending_turn_failure_merges_session_and_error_details_in_either_order() {
+        async fn collect(session_first: bool) -> PendingTurnFailure {
+            let db = fresh_in_memory_db().await;
+            let folder_id = seed_folder(&db, "/tmp/merge-failure").await;
+            let conversation_id =
+                seed_conversation(&db, folder_id, AgentType::Cursor).await;
+            let manager = ConnectionManager::new();
+            let _receiver =
+                insert_live_connection(&manager, "conn-merge", conversation_id, folder_id).await;
+            let engine = Arc::new(EventRulesEngine::new(
+                db,
+                manager,
+                Arc::new(InternalEventBus::new(Arc::new(EventBusMetrics::default()))),
+            ));
+            let mut session = session_failure_record();
+            session.category = "unknown".into();
+            session.title = "SessionFailure title".into();
+            session.details = Some("SessionFailure details".into());
+            let session_env = EventEnvelope {
+                seq: 1,
+                connection_id: "conn-merge".into(),
+                payload: AcpEvent::SessionFailure { record: session },
+            };
+            let error_env = EventEnvelope {
+                seq: 2,
+                connection_id: "conn-merge".into(),
+                payload: AcpEvent::Error {
+                    message: "Error message".into(),
+                    agent_type: "cursor".into(),
+                    code: Some("turn_failed_connection".into()),
+                    details: Some("Error details".into()),
+                    terminal: false,
+                },
+            };
+            if session_first {
+                engine.on_envelope(&session_env).await;
+                engine.on_envelope(&error_env).await;
+            } else {
+                engine.on_envelope(&error_env).await;
+                engine.on_envelope(&session_env).await;
+            }
+            let pending = engine
+                .pending_failures
+                .lock()
+                .await
+                .remove("conn-merge")
+                .expect("merged pending failure");
+            pending
+        }
+
+        for session_first in [true, false] {
+            let pending = collect(session_first).await;
+            assert_eq!(pending.error_kind.as_deref(), Some("connection"));
+            assert!(pending.text.contains("SessionFailure title"));
+            assert!(pending.text.contains("SessionFailure details"));
+            assert!(pending.text.contains("Error message"));
+            assert!(pending.text.contains("Error details"));
+        }
+    }
+
+    #[tokio::test]
     async fn max_attempts_reset_after_successful_turn() {
         let db = fresh_in_memory_db().await;
         let rule_id = enable_tls_auto_resume_rule(&db).await;
@@ -969,7 +1099,7 @@ mod tests {
             mgr,
             Arc::new(InternalEventBus::new(Arc::new(EventBusMetrics::default()))),
         ));
-        engine.reload_rules().await;
+        engine.reload_rules().await.unwrap();
 
         for i in 0..3 {
             assert_eq!(
@@ -1024,7 +1154,7 @@ mod tests {
             mgr.clone_ref(),
             Arc::new(InternalEventBus::new(Arc::new(EventBusMetrics::default()))),
         ));
-        engine.reload_rules().await;
+        engine.reload_rules().await.unwrap();
 
         engine
             .on_envelope(&EventEnvelope {
@@ -1073,7 +1203,7 @@ mod tests {
             mgr,
             Arc::new(InternalEventBus::new(Arc::new(EventBusMetrics::default()))),
         ));
-        engine.reload_rules().await;
+        engine.reload_rules().await.unwrap();
 
         engine
             .on_envelope(&EventEnvelope {
@@ -1106,13 +1236,87 @@ mod tests {
             mgr,
             Arc::new(InternalEventBus::new(Arc::new(EventBusMetrics::default()))),
         ));
-        engine.reload_rules().await;
+        engine.reload_rules().await.unwrap();
 
         engine
             .handle_lifecycle_event(tls_failure_event(conv_id, folder_id, "session-offline"))
             .await;
 
         assert!(drain_prompt_texts(&mut cmd_rx).is_empty());
+    }
+
+    #[tokio::test]
+    async fn specific_target_chooses_idle_identity_matching_connection() {
+        use crate::event_rules::types::{
+            ActionKind, ConditionKind, ContainsMatchMode, ConversationRef, EventRuleConfig,
+            LifecycleTrigger, RuleAction, RuleCondition, RuleGuard,
+        };
+
+        let db = fresh_in_memory_db().await;
+        let folder_id = seed_folder(&db, "/tmp/specific-target").await;
+        let source_id = seed_conversation(&db, folder_id, AgentType::Cursor).await;
+        let target_id = seed_conversation(&db, folder_id, AgentType::Cursor).await;
+        let now = chrono::Utc::now();
+        let config = EventRuleConfig {
+            scope: Default::default(),
+            trigger: LifecycleTrigger::TurnFailed,
+            condition: RuleCondition {
+                kind: ConditionKind::None,
+                match_mode: ContainsMatchMode::All,
+                text_contains: vec![],
+                regex: None,
+                error_kind: None,
+            },
+            action: RuleAction {
+                kind: ActionKind::SendToConversation,
+                conversation_ref: ConversationRef::SpecificConversation,
+                conversation_id: Some(target_id),
+                prompt: "specific".into(),
+            },
+            guard: RuleGuard {
+                max_attempts: 3,
+                cooldown_ms: 0,
+            },
+        };
+        event_rule::ActiveModel {
+            name: Set("specific target".into()),
+            enabled: Set(true),
+            priority: Set(100),
+            builtin_key: Set(None),
+            config: Set(serde_json::to_string(&config).unwrap()),
+            created_at: Set(now),
+            updated_at: Set(now),
+            ..Default::default()
+        }
+        .insert(&db.conn)
+        .await
+        .expect("insert specific target rule");
+
+        let manager = ConnectionManager::new();
+        let mut busy =
+            insert_live_connection(&manager, "target-busy", target_id, folder_id).await;
+        let mut idle =
+            insert_live_connection(&manager, "target-idle", target_id, folder_id).await;
+        manager
+            .get_state("target-busy")
+            .await
+            .expect("busy connection")
+            .write()
+            .await
+            .turn_in_flight = true;
+        let engine = EventRulesEngine::new(
+            db,
+            manager,
+            Arc::new(InternalEventBus::new(Arc::new(EventBusMetrics::default()))),
+        );
+        engine.reload_rules().await.unwrap();
+
+        engine
+            .handle_lifecycle_event(tls_failure_event(source_id, folder_id, "specific-turn"))
+            .await;
+
+        assert!(drain_prompt_texts(&mut busy).is_empty());
+        assert_eq!(drain_prompt_texts(&mut idle), vec!["specific"]);
     }
 
     #[tokio::test]
@@ -1128,7 +1332,7 @@ mod tests {
             mgr.clone_ref(),
             Arc::new(InternalEventBus::new(Arc::new(EventBusMetrics::default()))),
         ));
-        engine.reload_rules().await;
+        engine.reload_rules().await.unwrap();
 
         for turn_marker in 0..2 {
             if let Some(state) = mgr.get_state("conn-turns").await {

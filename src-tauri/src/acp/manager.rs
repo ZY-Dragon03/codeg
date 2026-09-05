@@ -3276,6 +3276,34 @@ impl ConnectionManager {
         None
     }
 
+    /// Resolve a conversation to a connection that can accept an automatic
+    /// follow-up prompt. A conversation can have several live ACP sessions
+    /// during reconnect/session preservation, so an arbitrary HashMap entry is
+    /// unsafe here. Require matching identity, Connected status, and an idle
+    /// session, then choose deterministically among eligible connections.
+    pub async fn find_eligible_connection_by_conversation_id(
+        &self,
+        conversation_id: i32,
+    ) -> Option<String> {
+        let now = chrono::Utc::now();
+        let connections = self.connections.lock().await;
+        let mut eligible = Vec::new();
+        for (id, conn) in connections.iter() {
+            let state = conn.state.read().await;
+            if state.conversation_id != Some(conversation_id)
+                || state.status != ConnectionStatus::Connected
+                || state.turn_in_flight
+                || state.pending_permission.is_some()
+                || state.has_active_background_work(now)
+            {
+                continue;
+            }
+            eligible.push(id.clone());
+        }
+        eligible.sort();
+        eligible.into_iter().next()
+    }
+
     /// The in-flight user prompt for `conversation_id` and the instant its turn
     /// started, if a turn is currently running on its live connection. `Some`
     /// exactly between `UserMessage` and `TurnComplete` (see
@@ -5554,6 +5582,34 @@ mod tests {
             .expect("should find c1");
         assert_eq!(found, "c1");
         assert!(mgr.find_connection_by_conversation_id(999).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn find_eligible_connection_skips_busy_or_disconnected_siblings() {
+        let mgr = ConnectionManager::new();
+        {
+            let mut map = mgr.connections.lock().await;
+            let busy = fake_connection("busy", Some(42));
+            busy.state.write().await.turn_in_flight = true;
+            map.insert("busy".to_string(), busy);
+
+            let disconnected = fake_connection("disconnected", Some(42));
+            disconnected.state.write().await.status = ConnectionStatus::Disconnected;
+            map.insert("disconnected".to_string(), disconnected);
+
+            map.insert("idle-a".to_string(), fake_connection("idle-a", Some(42)));
+            map.insert("idle-b".to_string(), fake_connection("idle-b", Some(42)));
+        }
+
+        assert_eq!(
+            mgr.find_eligible_connection_by_conversation_id(42).await,
+            Some("idle-a".to_string()),
+            "selection must be deterministic among multiple idle connections"
+        );
+        assert!(mgr
+            .find_eligible_connection_by_conversation_id(999)
+            .await
+            .is_none());
     }
 
     #[tokio::test]

@@ -82,3 +82,45 @@ when reconnect/session preservation leaves multiple live connections for one
 persistent conversation, `source_conversation` now uses the event's exact
 connection while `specific_conversation` retains manager lookup. This prevents
 an automatic follow-up from landing on an older session.
+
+## Current-baseline review fixes (2026-09-05)
+
+The formal review fixes on `feature/event-automation-current` are complete:
+
+- `m20260905_000001_event_rule_log_structured` is a separate, idempotent
+  compatibility migration. It checks `pragma_table_info` for every structured
+  log column and only issues a missing-column `ALTER TABLE`.
+- Rule CRUD now returns reload errors to the caller. Reload uses bounded
+  100ms/500ms retries and replaces the in-memory rule set only after a
+  successful read, so a failed runtime reload cannot be reported as a
+  successful disable/delete/update.
+- `PendingTurnFailure` merges SessionFailure title/details with Error
+  message/details in either arrival order. `unknown` never replaces a more
+  specific `error_kind`; both orders are covered by an executable test.
+- Specific-conversation actions choose a deterministic eligible connection
+  whose conversation identity matches and whose state is Connected, idle, and
+  free of pending permission/background work. Busy/disconnected sibling
+  connections are covered by manager and engine tests.
+- Preview now reports `target_exists` separately from runtime
+  `target_available`; a persisted row without an eligible runtime is no longer
+  described as available.
+- Conversation Event Automation shows applicable conversation, folder,
+  agent-type, and global rules and labels inherited folder/agent/global rules
+  explicitly. The shared editor and header dialog continue to use the same
+  rule and log APIs.
+- Execution-log writes use bounded retries and emit an ERROR with the
+  action-may-have-been-sent context if the final append still fails.
+
+Focused receipts after these changes:
+
+- `cargo check --no-default-features --bin codeg-server` — PASS.
+- `cargo test --no-default-features --lib event_rules::engine::tests` — 12
+  passed, including merge-order and multi-connection target tests.
+- `cargo test --no-default-features --lib acp::manager::tests::find_eligible_connection_skips_busy_or_disconnected_siblings` — PASS.
+- `cargo test --no-default-features --lib commands::event_rule::tests` — 3
+  passed, including target existence/runtime preview semantics.
+- `cargo test --no-default-features --lib db::migration::m20260905_000001_event_rule_log_structured::tests` — PASS.
+- `pnpm exec tsc --noEmit` — PASS.
+- Targeted Vitest for the event-rule editor, Automations page, and conversation
+  header — 17 passed. Existing `act(...)` warnings in Automations page tests
+  remain non-failing.

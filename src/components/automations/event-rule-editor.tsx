@@ -579,9 +579,11 @@ export function EventRuleEditor({
             </p>
             <p>
               Target:{" "}
-              {preview.target_available
-                ? (preview.resolved_target_id ?? "source")
-                : "unavailable"}
+              {!preview.target_exists
+                ? "missing"
+                : preview.target_available
+                  ? (preview.resolved_target_id ?? "source")
+                  : `${preview.resolved_target_id ?? "source"} exists but has no connected idle runtime`}
               .
             </p>
             <p>

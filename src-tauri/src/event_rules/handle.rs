@@ -2,6 +2,8 @@
 
 use std::sync::{Arc, OnceLock};
 
+use crate::db::error::DbError;
+
 use super::EventRulesEngine;
 
 #[derive(Clone, Default)]
@@ -20,9 +22,20 @@ impl EventRulesEngineHandle {
         let _ = self.inner.set(engine);
     }
 
-    pub async fn reload_rules(&self) {
+    pub async fn reload_rules(&self) -> Result<(), DbError> {
         if let Some(engine) = self.inner.get() {
-            engine.reload_rules().await;
+            return engine.reload_rules().await;
+        }
+        Err(DbError::Validation(
+            "event rules engine is not initialized".into(),
+        ))
+    }
+
+    pub async fn target_available(&self, conversation_id: i32) -> bool {
+        if let Some(engine) = self.inner.get() {
+            engine.target_available(conversation_id).await
+        } else {
+            false
         }
     }
 

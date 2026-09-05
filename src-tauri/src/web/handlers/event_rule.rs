@@ -167,9 +167,15 @@ pub async fn event_rule_preview(
     Json(params): Json<PreviewEventRuleParams>,
 ) -> Result<Json<EventRulePreview>, AppCommandError> {
     Ok(Json(
-        core::event_rule_preview_core(&state.db, params.rule_id, params.draft, params.sample)
-            .await
-            .map_err(AppCommandError::from)?,
+        core::event_rule_preview_core(
+            &state.db,
+            &state.event_rules_engine,
+            params.rule_id,
+            params.draft,
+            params.sample,
+        )
+        .await
+        .map_err(AppCommandError::from)?,
     ))
 }
 pub async fn event_rule_list_logs(

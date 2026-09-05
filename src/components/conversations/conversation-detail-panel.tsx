@@ -2797,6 +2797,7 @@ export function ConversationDetailPanel() {
               conversationId={selTab.conversationId}
               runtimeConversationId={selTab.runtimeConversationId ?? null}
               folderId={selTab.folderId}
+              agentType={selTab.agentType}
               folderPath={selTabFolder?.path}
               title={selTab.title}
               status={selTab.status as ConversationStatus | undefined}
@@ -2845,6 +2846,7 @@ export function ConversationDetailPanel() {
             conversationId={activeTab.conversationId}
             runtimeConversationId={activeTab.runtimeConversationId ?? null}
             folderId={activeTab.folderId}
+            agentType={activeTab.agentType}
             folderPath={activeTabFolder?.path}
             title={activeTab.title}
             status={activeTab.status as ConversationStatus | undefined}

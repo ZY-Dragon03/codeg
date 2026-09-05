@@ -68,6 +68,7 @@ describe("EventRuleEditor", () => {
       scope_matches: true,
       condition_matches: true,
       resolved_target_id: 41,
+      target_exists: true,
       target_available: true,
       winner_rule_id: null,
       draft_is_winner: true,

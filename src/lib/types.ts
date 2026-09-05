@@ -1593,6 +1593,7 @@ export interface EventRulePreview {
   scope_matches: boolean
   condition_matches: boolean
   resolved_target_id: number | null
+  target_exists: boolean
   target_available: boolean
   winner_rule_id: number | null
   draft_is_winner: boolean

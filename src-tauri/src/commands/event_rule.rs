@@ -25,6 +25,7 @@ pub struct EventRulePreview {
     pub scope_matches: bool,
     pub condition_matches: bool,
     pub resolved_target_id: Option<i32>,
+    pub target_exists: bool,
     pub target_available: bool,
     pub winner_rule_id: Option<i32>,
     pub draft_is_winner: bool,
@@ -115,7 +116,7 @@ pub async fn event_rule_create_core(
 ) -> Result<EventRuleInfo, DbError> {
     validate_authoritative(db, &draft).await?;
     let info = event_rule_service::create(&db.conn, draft).await?;
-    engine.reload_rules().await;
+    engine.reload_rules().await?;
     Ok(info)
 }
 
@@ -127,12 +128,13 @@ pub async fn event_rule_update_core(
 ) -> Result<EventRuleInfo, DbError> {
     validate_authoritative(db, &draft).await?;
     let info = event_rule_service::update(&db.conn, id, draft).await?;
-    engine.reload_rules().await;
+    engine.reload_rules().await?;
     Ok(info)
 }
 
 pub async fn event_rule_preview_core(
     db: &AppDatabase,
+    engine: &EventRulesEngineHandle,
     draft_rule_id: Option<i32>,
     draft: EventRuleDraft,
     sample: PreviewSample,
@@ -198,12 +200,19 @@ pub async fn event_rule_preview_core(
             draft.config.action.conversation_id
         }
     };
-    let target_available = if let Some(id) = resolved_target_id {
+    let target_exists = if let Some(id) = resolved_target_id {
         crate::db::entities::conversation::Entity::find_by_id(id)
             .filter(crate::db::entities::conversation::Column::DeletedAt.is_null())
             .one(&db.conn)
             .await?
             .is_some()
+    } else {
+        false
+    };
+    let target_available = if target_exists {
+        engine
+            .target_available(resolved_target_id.expect("target exists implies an id"))
+            .await
     } else {
         false
     };
@@ -223,6 +232,7 @@ pub async fn event_rule_preview_core(
         scope_matches: scope_ok,
         condition_matches: condition_ok,
         resolved_target_id,
+        target_exists,
         target_available,
         winner_rule_id,
         draft_is_winner,
@@ -300,7 +310,7 @@ pub async fn event_rule_set_enabled_core(
     enabled: bool,
 ) -> Result<EventRuleInfo, DbError> {
     let info = event_rule_service::set_enabled(&db.conn, id, enabled).await?;
-    engine.reload_rules().await;
+    engine.reload_rules().await?;
     Ok(info)
 }
 
@@ -310,7 +320,7 @@ pub async fn event_rule_delete_core(
     id: i32,
 ) -> Result<(), DbError> {
     event_rule_service::delete(&db.conn, id).await?;
-    engine.reload_rules().await;
+    engine.reload_rules().await?;
     Ok(())
 }
 
@@ -386,11 +396,12 @@ pub async fn event_rule_validate(
 #[tauri::command]
 pub async fn event_rule_preview(
     db: tauri::State<'_, AppDatabase>,
+    engine: tauri::State<'_, EventRulesEngineHandle>,
     rule_id: Option<i32>,
     draft: EventRuleDraft,
     sample: PreviewSample,
 ) -> Result<EventRulePreview, DbError> {
-    event_rule_preview_core(&db, rule_id, draft, sample).await
+    event_rule_preview_core(&db, &engine, rule_id, draft, sample).await
 }
 
 #[cfg(feature = "tauri-runtime")]
@@ -457,7 +468,7 @@ mod tests {
             ConnectionManager::new(),
             Arc::new(InternalEventBus::new(Arc::new(EventBusMetrics::default()))),
         ));
-        engine.reload_rules().await;
+        engine.reload_rules().await.unwrap();
         handle.set(engine);
 
         let draft = EventRuleDraft {
@@ -522,6 +533,7 @@ mod tests {
 
         let preview = event_rule_preview_core(
             &db,
+            &EventRulesEngineHandle::new(),
             None,
             draft_for_conversation(conversation_id),
             PreviewSample {
@@ -536,6 +548,8 @@ mod tests {
         assert!(preview.scope_matches && preview.condition_matches);
         assert!(preview.draft_is_winner);
         assert_eq!(preview.resolved_target_id, Some(conversation_id));
+        assert!(preview.target_exists);
+        assert!(!preview.target_available);
         assert_eq!(
             event_rule_attempt::Entity::find().count(&db.conn).await.unwrap(),
             before_attempts

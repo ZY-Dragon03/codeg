@@ -19,28 +19,47 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Switch } from "@/components/ui/switch"
 import { EventRuleEditor } from "./event-rule-editor"
 
-function isApplicable(rule: EventRule, conversationId: number | null) {
-  if (conversationId == null) return rule.config.scope.kind === "global"
-  return (
-    rule.config.scope.kind === "global" ||
-    (rule.config.scope.kind === "conversation" &&
-      rule.config.scope.conversation_id === conversationId)
-  )
-}
-function scopeLabel(rule: EventRule) {
+function isApplicable(
+  rule: EventRule,
+  conversationId: number | null,
+  folderId: number | null,
+  agentType: string | null
+) {
+  if (conversationId == null && folderId == null && agentType == null) {
+    return true
+  }
   const scope = rule.config.scope
-  if (scope.kind === "global") return "Global"
+  if (scope.kind === "global") return true
+  if (scope.kind === "conversation") {
+    return scope.conversation_id === conversationId
+  }
+  if (scope.kind === "folder") return scope.folder_id === folderId
+  return scope.agent_type === agentType
+}
+function scopeLabel(rule: EventRule, inherited = false) {
+  const scope = rule.config.scope
+  if (scope.kind === "global")
+    return inherited ? "Global (inherited)" : "Global"
   if (scope.kind === "conversation")
     return `Conversation #${scope.conversation_id}`
-  if (scope.kind === "folder") return `Folder #${scope.folder_id}`
-  return `Agent ${scope.agent_type}`
+  if (scope.kind === "folder")
+    return inherited
+      ? `Folder #${scope.folder_id} (inherited)`
+      : `Folder #${scope.folder_id}`
+  return inherited
+    ? `Agent ${scope.agent_type} (inherited)`
+    : `Agent ${scope.agent_type}`
 }
 
 export function EventAutomationsPanel({
   conversationId = null,
+  folderId = null,
+  agentType = null,
   dialog = false,
 }: {
   conversationId?: number | null
+  folderId?: number | null
+  agentType?: string | null
   dialog?: boolean
 }) {
   const [rules, setRules] = useState<EventRule[]>([])
@@ -106,11 +125,13 @@ export function EventAutomationsPanel({
   }, [selected, loadLogs])
   const visibleRules = useMemo(
     () =>
-      conversationId == null
-        ? rules
-        : rules.filter((rule) => isApplicable(rule, conversationId)),
-    [rules, conversationId]
+      rules.filter((rule) =>
+        isApplicable(rule, conversationId, folderId, agentType)
+      ),
+    [rules, conversationId, folderId, agentType]
   )
+  const contextual =
+    conversationId != null || folderId != null || agentType != null
   const save = async (draft: EventRuleDraft) => {
     setError(null)
     try {
@@ -227,7 +248,8 @@ export function EventAutomationsPanel({
                         </span>
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {scopeLabel(rule)} · {rule.config.condition.kind}
+                        {scopeLabel(rule, contextual)} ·{" "}
+                        {rule.config.condition.kind}
                       </p>
                     </button>
                     <div className="mt-3 flex items-center justify-between">
@@ -268,6 +290,7 @@ export function EventAutomationsPanel({
           </ScrollArea>
           <RuleDetail
             rule={selected}
+            contextual={contextual}
             logs={logs}
             nextCursor={nextCursor}
             loadMore={() =>
@@ -285,12 +308,14 @@ export function EventAutomationsPanel({
 
 function RuleDetail({
   rule,
+  contextual,
   logs,
   nextCursor,
   loadMore,
   onEdit,
 }: {
   rule: EventRule | null
+  contextual: boolean
   logs: EventRuleLog[]
   nextCursor: number | null
   loadMore: () => void
@@ -310,7 +335,7 @@ function RuleDetail({
             <div>
               <h3 className="font-semibold">{rule.name}</h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                {scopeLabel(rule)} · priority {rule.priority} ·{" "}
+                {scopeLabel(rule, contextual)} · priority {rule.priority} ·{" "}
                 {rule.enabled ? "enabled" : "disabled"}
               </p>
             </div>

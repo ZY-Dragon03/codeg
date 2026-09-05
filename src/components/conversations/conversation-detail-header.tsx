@@ -80,6 +80,7 @@ interface ConversationDetailHeaderProps {
    *  to `conversationId`; used to resolve live session details. */
   runtimeConversationId: number | null
   folderId: number
+  agentType?: string
   folderPath: string | undefined
   title: string
   status: ConversationStatus | undefined
@@ -104,6 +105,7 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
   conversationId,
   runtimeConversationId,
   folderId,
+  agentType,
   folderPath,
   title,
   status,
@@ -374,7 +376,12 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
           <DialogHeader>
             <DialogTitle>Event Automation</DialogTitle>
           </DialogHeader>
-          <EventAutomationsPanel conversationId={conversationId} dialog />
+          <EventAutomationsPanel
+            conversationId={conversationId}
+            folderId={folderId}
+            agentType={agentType}
+            dialog
+          />
         </DialogContent>
       </Dialog>
 

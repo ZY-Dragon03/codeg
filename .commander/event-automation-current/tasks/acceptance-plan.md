@@ -89,3 +89,28 @@ is recorded as `NOT_PROVEN` (the explicit `http://127.0.0.1:9223/json/list`
 probe was refused and the Windows Computer Use `sky` service is not configured);
 the desktop compile/launch receipt and the full Web transport receipt remain
 separate evidence.
+
+## Local schema compatibility receipt (2026-09-05)
+
+Before using the installed current release, all existing Codeg processes were
+closed and the real database was copied to
+`C:\Users\Asus\AppData\Roaming\app.codeg\codeg.before-event-automation-schema-fix.20260905.db`.
+The source and backup SHA-256 were both
+`FDA9AD16C1E41009CECA8771EF810D01A5D33D7D76F5919D57F526A31EB2D276`.
+
+The pre-repair `event_rule_log` schema had only the legacy six columns. A
+guarded Python `sqlite3` repair added only the missing columns
+`source_conversation_id`, `resolved_target_id`, `trigger`, `action`,
+`prompt_snapshot`, and `guard_reason`; the post-repair PRAGMA confirmed all
+six. A schema/row comparison against the backup showed no non-log table or row
+changes, the existing `event_rule` row remained enabled, and no logs were
+cleared. The compatible formal migration is now
+`m20260905_000001_event_rule_log_structured` and checks each column before
+adding it, so it is safe after this manual repair.
+
+`src-tauri/target/release/codeg.exe` launched with a Codeg window from the
+current branch. Native app/WebView inspection is unavailable in this Codex
+session, so direct visual checks for the Event Automations list, execution-log
+page, and conversation-header button remain `NOT_PROVEN`; no claim is made
+from a mocked browser surface. The existing `retriable_error_auto_resume` row
+was present with `enabled=1`.

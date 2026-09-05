@@ -21,6 +21,7 @@ pub enum GuardDecision {
     MaxAttempts,
 }
 
+#[derive(Debug, Clone)]
 pub struct ExecutionLogDraft {
     pub rule_id: i32,
     pub source_conversation_id: i32,
