@@ -403,7 +403,11 @@ impl EventAutomationAccess for ConnectionEventAutomationAccess {
                     )
                     .await;
                 };
-                let Some(terminal_id) = req.process_ref.clone() else {
+                // The ACP `terminal/create` response is authoritative. Keep
+                // the legacy process_ref fallback only for older callers, but
+                // never let it override a supplied terminal identity.
+                let terminal_ref = req.terminal_id.clone().or(req.process_ref.clone());
+                let Some(terminal_id) = terminal_ref else {
                     return Self::error_response(
                         "wake_on_process_exit requires the terminal id returned by terminal/create",
                     )

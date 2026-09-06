@@ -805,16 +805,18 @@ async fn build_tools_call_spawn(
                     "wake_on_process_exit requires terminal_id",
                 ));
             }
+            let process_ref = arguments
+                .get("process_ref")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .or_else(|| terminal_id.clone());
             let req = BrokerWakeRequest {
                 token: ctx.token.clone(),
                 trigger_kind: trigger_kind.to_owned(),
                 duration_ms,
                 at,
                 terminal_id,
-                process_ref: arguments
-                    .get("process_ref")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
+                process_ref,
                 prompt: prompt.to_owned(),
             };
             let round_trip = Box::pin(async move { client_wake_round_trip(&socket, &req).await });

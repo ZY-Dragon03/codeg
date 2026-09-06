@@ -3413,6 +3413,9 @@ impl ConnectionManager {
         let state = connection.state.read().await;
         if connection.agent_type != agent_type
             || state.external_id.as_deref() != Some(external_id.as_str())
+            || state
+                .conversation_id
+                .is_some_and(|bound_id| bound_id != conversation_id)
             || state.working_dir.as_deref().map(std::path::Path::to_string_lossy)
                 != Some(std::borrow::Cow::Owned(working_dir.clone()))
             || state.status != ConnectionStatus::Connected
