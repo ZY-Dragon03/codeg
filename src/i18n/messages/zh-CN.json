@@ -5589,6 +5589,7 @@
   },
   "EventAutomations": {
     "scheduled": "定时自动化",
+    "registryTitle": "自动化注册表", "registryDescription": "在一个地方管理事件规则和唤醒触发器。", "registrySearchPlaceholder": "搜索名称、关键词、正则、提示词、目标、创建者、类型或唤醒描述", "registryEmpty": "暂无自动化。", "registryUserCreated": "用户创建", "newWake": "新建唤醒", "wake": "唤醒", "sortActive": "活跃优先", "sortApplicable": "适用优先", "sortPriority": "优先级", "sortId": "最新 ID", "priority": "优先级", "wakeEditorTitle": "创建唤醒", "wakeNamePlaceholder": "唤醒名称", "wakeAfter": "延迟后", "wakeAt": "指定时间", "wakeProcessExit": "进程退出时", "wakeValuePlaceholder": "秒数、时间或进程 ID", "wakeTargetPlaceholder": "目标会话（可选）", "wakePromptPlaceholder": "唤醒时发送的消息",
     "event": "事件自动化",
     "tabsLabel": "自动化类型",
     "title": "事件自动化",

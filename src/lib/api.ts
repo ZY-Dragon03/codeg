@@ -29,6 +29,9 @@ import type {
   EventRuleLogPage,
   EventRulePreview,
   EventRulePreviewSample,
+  AutomationRegistryItem,
+  WakeDraft,
+  WakeRecord,
   ForgeChangeDetail,
   ForgeChangedFileList,
   ForgeComment,
@@ -3471,6 +3474,46 @@ export async function eventRuleListLogs(params: {
   limit?: number
 }): Promise<EventRuleLogPage> {
   return getTransport().call("event_rule_list_logs", params)
+}
+
+/** Unified registry projection. Older servers may not expose this method; the
+ * adapter falls back to EventRules so the page remains usable during rollout. */
+export async function automationRegistryList(): Promise<AutomationRegistryItem[]> {
+  let items: AutomationRegistryItem[] | null = null
+  try {
+    const result = await getTransport().call<unknown>("automation_registry_list")
+    if (Array.isArray(result)) items = result as AutomationRegistryItem[]
+    if (result && typeof result === "object" && "items" in result) {
+      const payloadItems = (result as { items?: unknown }).items
+      if (Array.isArray(payloadItems)) items = payloadItems as AutomationRegistryItem[]
+    }
+  } catch {
+    // Compatibility with pre-registry servers.
+  }
+  const rules = items ?? (await eventRuleList()).map((rule) => ({
+    ...rule,
+    type: "event_rule" as const,
+    provenance: rule.builtin_key ? "builtin" : "user",
+  }))
+  if (rules.some((item) => item.type === "wake")) return rules
+  try {
+    return [...rules, ...(await wakeList()).map((wake) => ({ ...wake, type: "wake" as const }))]
+  } catch {
+    return rules
+  }
+}
+
+export async function wakeList(): Promise<WakeRecord[]> {
+  return getTransport().call("wake_list")
+}
+export async function wakeCreate(draft: WakeDraft): Promise<WakeRecord> {
+  return getTransport().call("wake_create", { draft })
+}
+export async function wakeUpdate(id: number, draft: WakeDraft): Promise<WakeRecord> {
+  return getTransport().call("wake_update", { id, draft })
+}
+export async function wakeCancel(id: number): Promise<void> {
+  return getTransport().call("wake_cancel", { id })
 }
 
 // Work tasks

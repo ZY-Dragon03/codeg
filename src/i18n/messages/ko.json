@@ -5589,6 +5589,7 @@
   },
   "EventAutomations": {
     "scheduled": "예약 자동화",
+    "registryTitle": "자동화 레지스트리", "registryDescription": "이벤트 규칙과 Wake 트리거를 한 곳에서 관리합니다.", "registrySearchPlaceholder": "이름, 키워드, 정규식, 프롬프트, 대상, 생성자, 유형 또는 설명 검색", "registryEmpty": "자동화가 없습니다.", "registryUserCreated": "사용자 생성", "newWake": "새 Wake", "wake": "Wake", "sortActive": "활성 먼저", "sortApplicable": "적용 가능 먼저", "sortPriority": "우선순위", "sortId": "최신 ID", "priority": "우선순위", "wakeEditorTitle": "Wake 만들기", "wakeNamePlaceholder": "Wake 이름", "wakeAfter": "지연 후", "wakeAt": "지정 시간", "wakeProcessExit": "프로세스 종료 시", "wakeValuePlaceholder": "초, 시간 또는 프로세스 ID", "wakeTargetPlaceholder": "대상 대화(선택 사항)", "wakePromptPlaceholder": "Wake 실행 시 보낼 메시지",
     "event": "이벤트 자동화",
     "tabsLabel": "자동화 유형",
     "title": "이벤트 자동화",

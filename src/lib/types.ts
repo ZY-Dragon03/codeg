@@ -1636,6 +1636,48 @@ export interface EventRuleLogPage {
   next_cursor: number | null
 }
 
+/** Unified Automation Registry records. Optional fields keep the UI compatible
+ * with older servers while the Wake contract rolls out. */
+export type AutomationRegistryType = "event_rule" | "wake"
+export type AutomationRegistryProvenance = "user" | "agent" | "builtin" | string
+export type WakeSchedule =
+  | { kind: "after"; delay_ms: number }
+  | { kind: "at"; at: string }
+  | { kind: "process_exit"; process_id?: number | null }
+export interface WakeRecord {
+  id: number
+  name: string
+  enabled: boolean
+  status?: string | null
+  schedule: WakeSchedule
+  prompt?: string | null
+  target?: string | null
+  target_conversation_id?: number | null
+  description?: string | null
+  creator?: string | null
+  provenance?: AutomationRegistryProvenance
+  created_at?: string
+  updated_at?: string
+  cancelled_at?: string | null
+}
+export interface WakeDraft {
+  name: string
+  schedule: WakeSchedule
+  prompt?: string | null
+  target_conversation_id?: number | null
+  enabled?: boolean
+}
+export interface AutomationRegistryEventRule extends EventRule {
+  type?: "event_rule"
+  provenance?: AutomationRegistryProvenance
+  creator?: string | null
+  target?: string | null
+  applicable?: boolean
+}
+export type AutomationRegistryItem =
+  | AutomationRegistryEventRule
+  | (WakeRecord & { type?: "wake" })
+
 // ─── Work tasks ────────────────────────────────────────────────────────────
 // Mirrors src-tauri/src/models/work_task.rs. Wire form is snake_case like
 // Automations. (Named WorkTask* because `Task` is taken by task-context.tsx.)

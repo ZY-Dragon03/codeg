@@ -5589,6 +5589,7 @@
   },
   "EventAutomations": {
     "scheduled": "Automatisations planifiées",
+    "registryTitle": "Registre des automatisations", "registryDescription": "Gérez les règles d’événement et les réveils au même endroit.", "registrySearchPlaceholder": "Rechercher nom, mot-clé, regex, invite, cible, créateur, type ou description", "registryEmpty": "Aucune automatisation.", "registryUserCreated": "Créée par l’utilisateur", "newWake": "Nouveau réveil", "wake": "Réveil", "sortActive": "Actives d’abord", "sortApplicable": "Applicables d’abord", "sortPriority": "Priorité", "sortId": "ID récent", "priority": "Priorité", "wakeEditorTitle": "Créer un réveil", "wakeNamePlaceholder": "Nom du réveil", "wakeAfter": "Après un délai", "wakeAt": "À une heure", "wakeProcessExit": "À la fin d’un processus", "wakeValuePlaceholder": "Secondes, heure ou ID de processus", "wakeTargetPlaceholder": "Conversation cible (facultatif)", "wakePromptPlaceholder": "Message à envoyer au réveil",
     "event": "Automatisations événementielles",
     "tabsLabel": "Type d’automatisation",
     "title": "Automatisation événementielle",

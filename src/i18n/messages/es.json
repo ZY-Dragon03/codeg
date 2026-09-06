@@ -5589,6 +5589,7 @@
   },
   "EventAutomations": {
     "scheduled": "Automatizaciones programadas",
+    "registryTitle": "Registro de automatizaciones", "registryDescription": "Gestiona reglas de eventos y activadores Wake en un solo lugar.", "registrySearchPlaceholder": "Buscar nombre, palabra clave, regex, prompt, destino, creador, tipo o descripción", "registryEmpty": "Aún no hay automatizaciones.", "registryUserCreated": "Creada por el usuario", "newWake": "Nuevo Wake", "wake": "Wake", "sortActive": "Activas primero", "sortApplicable": "Aplicables primero", "sortPriority": "Prioridad", "sortId": "ID más reciente", "priority": "Prioridad", "wakeEditorTitle": "Crear Wake", "wakeNamePlaceholder": "Nombre del Wake", "wakeAfter": "Después de un retraso", "wakeAt": "A una hora", "wakeProcessExit": "Cuando termina un proceso", "wakeValuePlaceholder": "Segundos, hora o ID del proceso", "wakeTargetPlaceholder": "Conversación destino (opcional)", "wakePromptPlaceholder": "Mensaje al activarse el Wake",
     "event": "Automatizaciones de eventos",
     "tabsLabel": "Tipo de automatización",
     "title": "Automatización de eventos",

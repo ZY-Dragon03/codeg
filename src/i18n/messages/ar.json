@@ -5589,6 +5589,7 @@
   },
   "EventAutomations": {
     "scheduled": "الأتمتة المجدولة",
+    "registryTitle": "سجل الأتمتة", "registryDescription": "إدارة قواعد الأحداث ومشغلات Wake في مكان واحد.", "registrySearchPlaceholder": "البحث بالاسم أو الكلمة أو regex أو الموجه أو الهدف أو المنشئ أو النوع أو الوصف", "registryEmpty": "لا توجد أتمتة بعد.", "registryUserCreated": "أنشأها المستخدم", "newWake": "Wake جديد", "wake": "Wake", "sortActive": "النشطة أولاً", "sortApplicable": "القابلة للتطبيق أولاً", "sortPriority": "الأولوية", "sortId": "أحدث معرّف", "priority": "الأولوية", "wakeEditorTitle": "إنشاء Wake", "wakeNamePlaceholder": "اسم Wake", "wakeAfter": "بعد تأخير", "wakeAt": "في وقت", "wakeProcessExit": "عند انتهاء عملية", "wakeValuePlaceholder": "الثواني أو الوقت أو معرّف العملية", "wakeTargetPlaceholder": "المحادثة المستهدفة (اختياري)", "wakePromptPlaceholder": "الرسالة عند تشغيل Wake",
     "event": "أتمتة الأحداث",
     "tabsLabel": "نوع الأتمتة",
     "title": "أتمتة الأحداث",
