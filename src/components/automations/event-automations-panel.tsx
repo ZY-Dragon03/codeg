@@ -345,22 +345,27 @@ export function EventAutomationsPanel({
       data-testid="event-automations-panel"
     >
       {!dialog ? (
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-lg font-semibold">{t("title")}</h2>
-            <p className="text-sm text-muted-foreground">{t("description")}</p>
-          </div>
-          <Button size="sm" onClick={() => setEditing("new")}>
-            <Plus className="size-4" /> {t("newRule")}
-          </Button>
+        <div>
+          <h2 className="text-lg font-semibold">{t("title")}</h2>
+          <p className="text-sm text-muted-foreground">{t("description")}</p>
         </div>
       ) : null}
-      <Input
-        value={search}
-        onChange={(event) => setSearch(event.target.value)}
-        placeholder={t("searchPlaceholder")}
-        aria-label={t("searchPlaceholder")}
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          className="min-w-0 flex-1"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder={t("searchPlaceholder")}
+          aria-label={t("searchPlaceholder")}
+        />
+        <Button
+          size="sm"
+          disabled={cannotCreate}
+          onClick={() => setEditing("new")}
+        >
+          <Plus className="size-4" /> {t("newRule")}
+        </Button>
+      </div>
       {cannotCreate ? (
         <p className="rounded-xl bg-muted px-3 py-2 text-sm text-muted-foreground">
           {t("header.disabledTooltip")}

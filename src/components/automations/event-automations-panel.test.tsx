@@ -144,6 +144,47 @@ describe("EventAutomationsPanel product surface", () => {
     })
   })
 
+  it("keeps the add action in the conversation dialog and seeds its scope", async () => {
+    render(
+      withIntl(
+        <EventAutomationsPanel conversationId={CONVERSATION.id} dialog />
+      )
+    )
+
+    await waitFor(() => expect(h.eventRuleList).toHaveBeenCalled())
+    expect(
+      screen.getByRole("textbox", {
+        name: zhCN.EventAutomations.searchPlaceholder,
+      })
+    ).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole("button", { name: zhCN.EventAutomations.newRule })
+    )
+
+    expect(
+      screen.getByText(zhCN.EventAutomations.editor.creationType)
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", {
+        name: zhCN.EventAutomations.editor.contentDetection,
+      })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", {
+        name: zhCN.EventAutomations.editor.forwardAfterCompletion,
+      })
+    ).toBeInTheDocument()
+
+    fireEvent.click(
+      screen.getByRole("button", { name: zhCN.EventAutomations.editor.save })
+    )
+    await waitFor(() => expect(h.eventRuleCreate).toHaveBeenCalled())
+    expect(h.eventRuleCreate.mock.calls[0][0].config.scope).toEqual({
+      kind: "conversation",
+      conversation_id: CONVERSATION.id,
+    })
+  })
+
   it("maps built-in run history to user language and hides raw status values", async () => {
     const log: EventRuleLog = {
       id: 11,
