@@ -13,7 +13,7 @@
 | 原文件或代码 | 冲突/缺口 | 裁定 |
 |---|---|---|
 | turn-failed-auto-resume/tasks 1.2 | UI deferred | 恢复为 Phase 1B，交付归 event-automation-ui |
-| 旧 phase-1 路线图 | 后端、Wake、review 混称 Phase 1 | Phase 1=1A+1B；Wake=2；review=3 |
+| 旧 phase-1 路线图 | 后端、Wake、review 混称 Phase 1 | Phase 1=1A+1B，1B 包含统一 Registry 与 Wake；reviewer 编排留给后续 |
 | experiment-audit-handoff/spec | reviewer 完成必定 resume 原 worker | 有效决策和硬护栏共同控制派发 |
 | action-target/design | 关闭后可新建/fallback spawn | Existing 保持身份；不能解析则可见失败 |
 | event_rules/types.rs:5,77；models/event_rule.rs:20 | trigger 只有 turn_failed；无 scope | 1B 补 scope，只开放受支持 trigger |
@@ -57,8 +57,8 @@ worker completed --> review (new or existing)
 
 ### 推荐顺序与真实依赖
 
-1. Phase 1B 契约差额（scope、target folder、校验/预览/日志）和 TS transport -> 共享编辑器/双入口 -> 实机验收。
-2. Wake Scheduler 可按用户价值接着做，但**不是 reviewer 的代码前置依赖**；timer/terminal 是独立 producer。
+1. Phase 1B 契约差额（scope、target folder、校验/预览/日志）、统一 Registry、Wake transport -> 共享编辑器/双入口 -> Desktop/Web 实机验收。
+2. Wake timer/terminal producer 与 EventRule 共用 existing-target executor，但**不是 reviewer 的代码前置依赖**。
 3. 稳定 existing-target resolver + settled-success lifecycle + reviewer decision capability。Existing reviewer 最小闭环可以先于 spawn。
 4. AutomationConfig spawn、新/已有 review target UI、通用 chain guards/recovery。
 5. 实验模板：E70 补实验后退出、A->B 改派、第三轮强制退出验收。
@@ -69,7 +69,7 @@ worker completed --> review (new or existing)
 
 复用 event_rules、event_rule/attempt/log 表、commands/event_rule.rs/Web handlers、transport、AutomationsPage、ConversationDetailHeader、DbConversationSummary、ACP send/reconnect、AutomationConfig、codeg-mcp 注入/认证。不能由复用推断已有 scope/decision/recovery。
 
-Phase 2+ 保留 Wake、reviewer、parent/spawned aliases。通用预算/状态表达式、LLM classifier、自然语言 PASS 解析、Webhook/CI/file watch、自动 merge、fan-out、跨主机会话和编排图不进入当前计划。用户停止、有限轮次、失败退出是闭环 V1 必需。
+Phase 1 保留 Wake 的 after/at/process-exit trigger；后续阶段只扩展 reviewer、parent/spawned aliases。通用预算/状态表达式、LLM classifier、自然语言 PASS 解析、Webhook/CI/file watch、自动 merge、fan-out、跨主机会话和编排图不进入当前计划。用户停止、有限轮次、失败退出是闭环 V1 必需。
 
 ## Risks / Trade-offs
 
@@ -147,6 +147,6 @@ Phase 2+ 保留 Wake、reviewer、parent/spawned aliases。通用预算/状态�
 | Attempts and cooldown | event rule service / turn-failed contract | Phase 1A |
 | Scope, editor, preview, logs and product UI | event-automation-ui | Phase 1 |
 | Reviewer decision, iterations and chain depth | reviewer-controlled-handoff | Later |
-| Timer/process wakes | agent-wake-scheduler | After backend |
+| Timer/process wakes | agent-wake-scheduler | Phase 1B |
 
 Phase 1 UI does not expose reviewer target/decision/chain fields. Runtime acceptance records branch/commit, locale, rule/source/target identity, actual prompt, log receipt and restart result; absent Desktop/Web evidence remains `UNKNOWN_NOT_PROVEN`.

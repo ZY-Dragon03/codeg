@@ -8,9 +8,9 @@ use crate::event_rules::types::LifecycleEvent;
 use crate::event_rules::EventRulesEngineHandle;
 use crate::models::{EventRuleDraft, EventRuleInfo};
 use chrono::{DateTime, Utc};
-use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 #[cfg(test)]
 use sea_orm::PaginatorTrait;
+use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -445,8 +445,7 @@ mod tests {
     use crate::db::AppDatabase;
     use crate::event_rules::types::{
         ActionKind, AutomationType, ConditionKind, ContainsMatchMode, ConversationRef,
-        EventRuleConfig,
-        LifecycleTrigger, RuleAction, RuleCondition, RuleGuard,
+        EventRuleConfig, LifecycleTrigger, RuleAction, RuleCondition, RuleGuard,
     };
     use crate::event_rules::{EventRulesEngine, EventRulesEngineHandle};
     use std::sync::Arc;
@@ -456,34 +455,39 @@ mod tests {
             name: "preview draft".into(),
             enabled: false,
             priority: 500,
+            creator_kind: None,
+            creator_conversation_id: None,
             config: EventRuleConfig {
                 automation_type: AutomationType::ContentDetection,
                 scope: crate::event_rules::types::RuleScope::Conversation { conversation_id },
                 trigger: LifecycleTrigger::TurnFailed,
                 condition: RuleCondition {
                     kind: ConditionKind::Contains,
-                source: Default::default(),
+                    source: Default::default(),
                     match_mode: ContainsMatchMode::Any,
                     text_contains: vec!["MY_CUSTOM_ERROR_123".into()],
                     regex: None,
                     error_kind: None,
-            error_severity: None,
-            error_title: None,
-            error_details: None,
-            },
+                    error_severity: None,
+                    error_title: None,
+                    error_details: None,
+                },
                 action: RuleAction {
                     kind: ActionKind::SendToConversation,
                     conversation_ref: ConversationRef::SourceConversation,
                     conversation_id: None,
                     prompt: "custom recovery".into(),
-                target_conversation_ids: vec![],
-                include_source_context: false,
-                include_recent_user_message: false,
-                include_final_report: false,
-                additional_prompt: None,
-                recent_user_message_ignore_rules: vec![],
-            },
-                guard: RuleGuard { max_attempts: 3, cooldown_ms: 0 },
+                    target_conversation_ids: vec![],
+                    include_source_context: false,
+                    include_recent_user_message: false,
+                    include_final_report: false,
+                    additional_prompt: None,
+                    recent_user_message_ignore_rules: vec![],
+                },
+                guard: RuleGuard {
+                    max_attempts: 3,
+                    cooldown_ms: 0,
+                },
             },
         }
     }
@@ -506,33 +510,35 @@ mod tests {
             name: "hot reload".into(),
             enabled: true,
             priority: 50,
+            creator_kind: None,
+            creator_conversation_id: None,
             config: EventRuleConfig {
                 automation_type: AutomationType::ContentDetection,
                 scope: Default::default(),
                 trigger: LifecycleTrigger::TurnFailed,
                 condition: RuleCondition {
                     kind: ConditionKind::None,
-                source: Default::default(),
+                    source: Default::default(),
                     match_mode: ContainsMatchMode::All,
                     text_contains: vec![],
                     regex: None,
                     error_kind: None,
-            error_severity: None,
-            error_title: None,
-            error_details: None,
-            },
+                    error_severity: None,
+                    error_title: None,
+                    error_details: None,
+                },
                 action: RuleAction {
                     kind: ActionKind::SendToConversation,
                     conversation_ref: ConversationRef::SourceConversation,
                     conversation_id: None,
                     prompt: "继续".into(),
-                target_conversation_ids: vec![],
-                include_source_context: false,
-                include_recent_user_message: false,
-                include_final_report: false,
-                additional_prompt: None,
-                recent_user_message_ignore_rules: vec![],
-            },
+                    target_conversation_ids: vec![],
+                    include_source_context: false,
+                    include_recent_user_message: false,
+                    include_final_report: false,
+                    additional_prompt: None,
+                    recent_user_message_ignore_rules: vec![],
+                },
                 guard: RuleGuard {
                     max_attempts: 3,
                     cooldown_ms: 5000,
@@ -571,7 +577,10 @@ mod tests {
             .count(&db.conn)
             .await
             .unwrap();
-        let before_logs = event_rule_log::Entity::find().count(&db.conn).await.unwrap();
+        let before_logs = event_rule_log::Entity::find()
+            .count(&db.conn)
+            .await
+            .unwrap();
 
         let preview = event_rule_preview_core(
             &db,
@@ -593,20 +602,24 @@ mod tests {
         assert!(preview.target_exists);
         assert!(!preview.target_available);
         assert_eq!(
-            event_rule_attempt::Entity::find().count(&db.conn).await.unwrap(),
+            event_rule_attempt::Entity::find()
+                .count(&db.conn)
+                .await
+                .unwrap(),
             before_attempts
         );
         assert_eq!(
-            event_rule_log::Entity::find().count(&db.conn).await.unwrap(),
+            event_rule_log::Entity::find()
+                .count(&db.conn)
+                .await
+                .unwrap(),
             before_logs
         );
     }
 
     #[tokio::test]
     async fn structured_logs_page_by_rule_and_conversation() {
-        use crate::db::service::event_rule_service::{
-            append_execution_log, ExecutionLogDraft,
-        };
+        use crate::db::service::event_rule_service::{append_execution_log, ExecutionLogDraft};
         let db = fresh_in_memory_db().await;
         let folder_id = seed_folder(&db, "/tmp/log-page").await;
         let conversation_id =
@@ -630,27 +643,16 @@ mod tests {
             .unwrap();
         }
 
-        let first = event_rule_list_logs_core(
-            &db,
-            Some(1),
-            Some(conversation_id),
-            None,
-            2,
-        )
-        .await
-        .unwrap();
+        let first = event_rule_list_logs_core(&db, Some(1), Some(conversation_id), None, 2)
+            .await
+            .unwrap();
         assert_eq!(first.items.len(), 2);
         assert_eq!(first.items[0].status, "fired");
         assert_eq!(first.items[0].resolved_target_id, Some(conversation_id));
-        let second = event_rule_list_logs_core(
-            &db,
-            Some(1),
-            Some(conversation_id),
-            first.next_cursor,
-            2,
-        )
-        .await
-        .unwrap();
+        let second =
+            event_rule_list_logs_core(&db, Some(1), Some(conversation_id), first.next_cursor, 2)
+                .await
+                .unwrap();
         assert_eq!(second.items.len(), 1);
         assert_eq!(second.items[0].prompt_snapshot.as_deref(), Some("one"));
     }

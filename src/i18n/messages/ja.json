@@ -5589,7 +5589,7 @@
   },
   "EventAutomations": {
     "scheduled": "スケジュール自動化",
-    "registryTitle": "自動化レジストリ", "registryDescription": "イベントルールと Wake トリガーを一か所で管理します。", "registrySearchPlaceholder": "名前、キーワード、正規表現、プロンプト、対象、作成者、種類、説明を検索", "registryEmpty": "自動化はまだありません。", "registryUserCreated": "ユーザー作成", "newWake": "新しい Wake", "wake": "Wake", "sortActive": "有効を先に", "sortApplicable": "適用対象を先に", "sortPriority": "優先度", "sortId": "新しい ID", "priority": "優先度", "wakeEditorTitle": "Wake を作成", "wakeNamePlaceholder": "Wake 名", "wakeAfter": "遅延後", "wakeAt": "指定時刻", "wakeProcessExit": "プロセス終了時", "wakeValuePlaceholder": "秒数、時刻、またはプロセス ID", "wakeTargetPlaceholder": "対象会話（任意）", "wakePromptPlaceholder": "Wake 発火時に送るメッセージ",
+    "registryTitle": "自動化レジストリ", "registryDescription": "イベントルールと Wake トリガーを一か所で管理します。", "registrySearchPlaceholder": "名前、キーワード、正規表現、プロンプト、対象、作成者、種類、説明を検索", "registryEmpty": "自動化はまだありません。", "registryUserCreated": "ユーザー作成", "registryAddCustom": "カスタムを追加", "newWake": "新しい Wake", "wake": "Wake", "sortActive": "有効を先に", "sortApplicable": "適用対象を先に", "sortPriority": "優先度", "sortId": "新しい ID", "priority": "優先度", "wakeEditorTitle": "Wake を作成", "wakeNamePlaceholder": "Wake 名", "wakeAfter": "遅延後", "wakeAt": "指定時刻", "wakeProcessExit": "プロセス終了時", "wakeValuePlaceholder": "秒数、時刻、またはプロセス ID", "wakeTargetPlaceholder": "対象会話（任意）", "wakePromptPlaceholder": "Wake 発火時に送るメッセージ",
     "event": "イベント自動化",
     "tabsLabel": "自動化の種類",
     "title": "イベント自動化",

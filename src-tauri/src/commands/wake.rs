@@ -61,6 +61,31 @@ pub async fn wake_cancel_core(
     agent_wake_service::cancel(&db.conn, source_conversation_id, id).await
 }
 
+pub async fn wake_update_core(
+    db: &AppDatabase,
+    source_conversation_id: i32,
+    id: i32,
+    draft: WakeDraft,
+) -> Result<agent_wake::Model, DbError> {
+    agent_wake_service::update(
+        &db.conn,
+        source_conversation_id,
+        id,
+        CreateWake {
+            source_conversation_id: draft.source_conversation_id,
+            source_connection_id: draft.source_connection_id,
+            terminal_id: draft.terminal_id,
+            process_ref: draft.process_ref,
+            trigger_kind: draft.trigger_kind,
+            fire_at: draft.fire_at,
+            prompt: draft.prompt,
+            creator_kind: draft.creator_kind,
+            creator_id: draft.creator_id,
+        },
+    )
+    .await
+}
+
 #[cfg(feature = "tauri-runtime")]
 #[tauri::command]
 pub async fn wake_list(
@@ -87,4 +112,15 @@ pub async fn wake_cancel(
     id: i32,
 ) -> Result<agent_wake::Model, DbError> {
     wake_cancel_core(&db, source_conversation_id, id).await
+}
+
+#[cfg(feature = "tauri-runtime")]
+#[tauri::command]
+pub async fn wake_update(
+    db: tauri::State<'_, AppDatabase>,
+    source_conversation_id: i32,
+    id: i32,
+    draft: WakeDraft,
+) -> Result<agent_wake::Model, DbError> {
+    wake_update_core(&db, source_conversation_id, id, draft).await
 }

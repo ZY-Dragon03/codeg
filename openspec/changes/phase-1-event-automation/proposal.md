@@ -8,7 +8,7 @@
 
 - Phase 1 = **1A 后端基础 + 1B 可实际使用的 Event Automation UI**。UI、keywords、ANY/ALL、regex、error_kind、prompt、max_attempts、cooldown、模板开关全部必需。
 - 两个入口：Automations 的 Scheduled / Event 页签；Conversation header 独立 Event Automation 按钮。共用 event_rule 数据、编辑器和执行系统。
-- Phase 2 = Wake Scheduler；Phase 3 = New/Existing reviewer、continue/reroute/exit、有限轮次、实验审计模板。后续阶段不再混称 Phase 1。
+- Phase 1B also includes the durable Wake Scheduler and its unified Registry surface; reviewer orchestration remains a later phase. The later phase owns New/Existing reviewer、continue/reroute/exit、有限轮次、实验审计模板。
 - 新建 event-automation-ui 负责 Phase 1B（包含必要的 scope、校验/预览、日志读取契约）；新建 reviewer-controlled-handoff 负责通用闭环。
 - experiment-audit-handoff 收窄为实验模板和验收，取消固定双规则回传。
 

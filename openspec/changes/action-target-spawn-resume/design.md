@@ -26,3 +26,13 @@
 ### Phase 1 target policy and shared executor (2026-09-06)
 
 The Phase 1 allowed-target policy is the source conversation plus explicitly selected existing conversation ids. The selection is persisted as a policy snapshot, but every dispatch re-reads target identity (conversation, folder, agent type, deletion state) and rechecks that policy. A narrowed policy, deleted target, busy target or offline target produces a visible per-target failure and never broadens the policy, changes target or spawns a session. `target_exists` and `runtime_available` are separate facts. Candidate connection selection is Connected + idle + identity matching; map iteration order is not a resolver.
+# Phase 1 target contract
+
+Phase 1 supports `send_to_conversation` to the source or explicitly selected
+existing conversations. `spawn_agent`, parent/spawned-agent references, and
+spawn payload orchestration remain Phase 3 capabilities and are unavailable
+in this phase. A target database row is not runtime availability: dispatch
+must re-read folder and conversation identity and choose a Connected, idle,
+identity-matching connection. Deleted, busy, or offline targets are retained
+and reported as failures; no HashMap-first connection and no spawn fallback is
+allowed.

@@ -228,6 +228,7 @@ pub struct ConnectionManager {
     /// into each connection runtime so a setting update applies to existing
     /// model sessions as well as newly spawned ones.
     terminal_shell_config: TerminalShellRuntimeConfig,
+    wake_scheduler: Arc<std::sync::OnceLock<Arc<crate::wake_scheduler::WakeScheduler>>>,
     /// Delegation broker + token registry + UDS path installed during app
     /// bootstrap (`install_delegation`). When present, `spawn_agent` propagates
     /// the injection to `spawn_agent_connection`, which makes
@@ -294,6 +295,7 @@ impl ConnectionManager {
             spawn_locks: Arc::new(Mutex::new(HashMap::new())),
             spawn_handshake_timeout: spawn_handshake_timeout_from_env(),
             terminal_shell_config: TerminalShellRuntimeConfig::new(),
+            wake_scheduler: Arc::new(std::sync::OnceLock::new()),
             delegation_injection: Arc::new(std::sync::OnceLock::new()),
             chat_channel: Arc::new(std::sync::OnceLock::new()),
             probe_locks: Arc::new(Mutex::new(HashMap::new())),
@@ -309,6 +311,7 @@ impl ConnectionManager {
             spawn_locks: self.spawn_locks.clone(),
             spawn_handshake_timeout: self.spawn_handshake_timeout,
             terminal_shell_config: self.terminal_shell_config.clone(),
+            wake_scheduler: self.wake_scheduler.clone(),
             delegation_injection: self.delegation_injection.clone(),
             chat_channel: self.chat_channel.clone(),
             probe_locks: self.probe_locks.clone(),
@@ -351,6 +354,16 @@ impl ConnectionManager {
         self.terminal_shell_config.clone()
     }
 
+    pub fn set_wake_scheduler(&self, scheduler: Arc<crate::wake_scheduler::WakeScheduler>) {
+        let _ = self.wake_scheduler.set(scheduler);
+    }
+
+    pub(crate) fn wake_scheduler_snapshot(
+        &self,
+    ) -> Option<Arc<crate::wake_scheduler::WakeScheduler>> {
+        self.wake_scheduler.get().cloned()
+    }
+
     /// Test-only constructor that overrides the spawn-handshake timeout.
     /// Production code should use `new()`.
     #[cfg(test)]
@@ -360,6 +373,7 @@ impl ConnectionManager {
             spawn_locks: Arc::new(Mutex::new(HashMap::new())),
             spawn_handshake_timeout: timeout,
             terminal_shell_config: TerminalShellRuntimeConfig::new(),
+            wake_scheduler: Arc::new(std::sync::OnceLock::new()),
             delegation_injection: Arc::new(std::sync::OnceLock::new()),
             chat_channel: Arc::new(std::sync::OnceLock::new()),
             probe_locks: Arc::new(Mutex::new(HashMap::new())),
@@ -539,6 +553,7 @@ impl ConnectionManager {
             preferred_config_values,
             self.delegation_snapshot(),
             self.terminal_shell_config.clone(),
+            self.wake_scheduler_snapshot(),
         )
         .await?;
 

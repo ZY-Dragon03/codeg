@@ -1945,6 +1945,7 @@ pub async fn spawn_agent_connection(
     preferred_config_values: BTreeMap<String, String>,
     delegation_injection: Option<DelegationInjection>,
     terminal_shell_config: TerminalShellRuntimeConfig,
+    wake_scheduler: Option<Arc<crate::wake_scheduler::WakeScheduler>>,
 ) -> Result<tokio::sync::oneshot::Receiver<()>, AcpError> {
     // Create the authoritative session state up front. Subsequent emit_with_state
     // calls write through this state and increment its seq counter so the first
@@ -2121,6 +2122,7 @@ pub async fn spawn_agent_connection(
             fs_policy,
             host_tools,
             stderr_tail,
+            wake_scheduler,
         )
         .await;
 
@@ -4692,6 +4694,7 @@ async fn run_connection(
     // callback installed by `build_agent`. Read only when a turn ends without
     // agent output, to attach evidence to the synthesized error.
     stderr_tail: Arc<StderrTail>,
+    wake_scheduler: Option<Arc<crate::wake_scheduler::WakeScheduler>>,
 ) -> Result<(), AcpError> {
     let pending_perms: PendingPermissions =
         Arc::new(tokio::sync::Mutex::new(PermissionQueue::default()));
@@ -4702,10 +4705,46 @@ async fn run_connection(
     // Default terminals to the session working directory so an agent that calls
     // `terminal/create` without a `cwd` (e.g. CodeBuddy) runs in the folder the
     // conversation runs in rather than codeg's own process cwd.
+    let terminal_created_callback = wake_scheduler.as_ref().map(|scheduler| {
+        let scheduler = scheduler.clone();
+        let source_connection_id = connection_id.clone();
+        Arc::new(move |terminal_id: String| {
+            scheduler.register_terminal(terminal_id, source_connection_id.clone());
+        }) as Arc<dyn Fn(String) + Send + Sync>
+    });
+    let process_exit_callback = wake_scheduler.map(|scheduler| {
+        let state = Arc::clone(&state);
+        let source_connection_id = connection_id.clone();
+        Arc::new(move |terminal_id: String| {
+            let scheduler = scheduler.clone();
+            let state = Arc::clone(&state);
+            let source_connection_id = source_connection_id.clone();
+            tokio::spawn(async move {
+                let source_conversation_id = state.read().await.conversation_id;
+                if let Some(source_conversation_id) = source_conversation_id {
+                    scheduler
+                        .on_process_exit_for_source(
+                            &terminal_id,
+                            source_conversation_id,
+                            &source_connection_id,
+                        )
+                        .await;
+                } else {
+                    tracing::warn!(
+                        terminal_id,
+                        source_connection_id,
+                        "[wake] process exited before its ACP conversation identity was bound"
+                    );
+                }
+            });
+        }) as Arc<dyn Fn(String) + Send + Sync>
+    });
     let terminal_runtime = Arc::new(
         TerminalRuntime::with_base_env(terminal_base_env)
             .with_default_cwd(Some(cwd.clone()))
-            .with_default_shell_config(terminal_shell_config),
+            .with_default_shell_config(terminal_shell_config)
+            .with_terminal_created_callback(terminal_created_callback)
+            .with_process_exit_callback(process_exit_callback),
     );
     let cwd_string = cwd.to_string_lossy().to_string();
     // The connection's security posture in one place, so what a live session

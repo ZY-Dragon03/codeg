@@ -5593,7 +5593,7 @@
     "registryDescription": "Manage event rules and wake triggers in one place.",
     "registrySearchPlaceholder": "Search name, keyword, regex, prompt, target, creator, type, or wake description",
     "registryEmpty": "No automations yet.",
-    "registryUserCreated": "User created",
+    "registryUserCreated": "User created", "registryAddCustom": "Add custom",
     "newWake": "New wake",
     "wake": "Wake",
     "sortActive": "Active first",

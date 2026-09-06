@@ -69,7 +69,7 @@ import {
   type ActiveSessionDetails,
 } from "./active-session-details"
 import { SessionDetailsDialog } from "./session-details-dialog"
-import { EventAutomationsPanel } from "@/components/automations/event-automations-panel"
+import { AutomationRegistryPanel } from "@/components/automations/automation-registry-panel"
 
 interface ConversationDetailHeaderProps {
   tabId: string
@@ -383,7 +383,7 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
           <DialogHeader>
             <DialogTitle>{tEvent("header.dialogTitle")}</DialogTitle>
           </DialogHeader>
-          <EventAutomationsPanel
+          <AutomationRegistryPanel
             conversationId={conversationId}
             folderId={folderId}
             agentType={agentType}

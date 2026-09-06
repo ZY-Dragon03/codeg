@@ -1,6 +1,7 @@
 //! Persistent one-shot wake scheduler. Wakes always resume an existing
 //! conversation through the same ACP follow-up path as Event Rules.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,11 +15,38 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 pub struct WakeScheduler {
     db: AppDatabase,
     manager: ConnectionManager,
+    terminal_owners: Arc<std::sync::RwLock<HashMap<String, String>>>,
 }
 
 impl WakeScheduler {
     pub fn new(db: AppDatabase, manager: ConnectionManager) -> Arc<Self> {
-        Arc::new(Self { db, manager })
+        Arc::new(Self {
+            db,
+            manager,
+            terminal_owners: Arc::new(std::sync::RwLock::new(HashMap::new())),
+        })
+    }
+
+    pub fn register_terminal(&self, terminal_id: String, connection_id: String) {
+        self.terminal_owners
+            .write()
+            .expect("wake terminal owner lock poisoned")
+            .insert(terminal_id, connection_id);
+    }
+
+    pub fn terminal_owned_by(&self, terminal_id: &str, connection_id: &str) -> bool {
+        self.terminal_owners
+            .read()
+            .expect("wake terminal owner lock poisoned")
+            .get(terminal_id)
+            .is_some_and(|owner| owner == connection_id)
+    }
+
+    fn unregister_terminal(&self, terminal_id: &str) {
+        self.terminal_owners
+            .write()
+            .expect("wake terminal owner lock poisoned")
+            .remove(terminal_id);
     }
 
     pub async fn run(self: Arc<Self>) {
@@ -55,10 +83,37 @@ impl WakeScheduler {
     /// Called by a typed terminal producer. The database claim absorbs both
     /// PTY EOF and the manager's periodic exit check when they race.
     pub async fn on_process_exit(&self, terminal_id: &str) {
-        let rows = match wakes::claim_process_exit(&self.db.conn, terminal_id).await {
+        self.unregister_terminal(terminal_id);
+        let rows = match wakes::claim_process_exit_for_source(&self.db.conn, terminal_id, None, None).await {
             Ok(rows) => rows,
             Err(error) => {
                 tracing::error!(terminal_id, "[wake] claim process exit failed: {error}");
+                return;
+            }
+        };
+        for wake in rows {
+            self.dispatch(wake).await;
+        }
+    }
+
+    pub async fn on_process_exit_for_source(
+        &self,
+        terminal_id: &str,
+        source_conversation_id: i32,
+        source_connection_id: &str,
+    ) {
+        self.unregister_terminal(terminal_id);
+        let rows = match wakes::claim_process_exit_for_source(
+            &self.db.conn,
+            terminal_id,
+            Some(source_conversation_id),
+            Some(source_connection_id),
+        )
+        .await
+        {
+            Ok(rows) => rows,
+            Err(error) => {
+                tracing::error!(terminal_id, source_conversation_id, "[wake] scoped process exit claim failed: {error}");
                 return;
             }
         };

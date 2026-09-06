@@ -16,6 +16,13 @@ pub struct CancelWake {
     pub source_conversation_id: i32,
     pub id: i32,
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateWake {
+    pub source_conversation_id: i32,
+    pub id: i32,
+    pub draft: WakeDraft,
+}
 
 pub async fn wake_list(
     Extension(state): Extension<Arc<AppState>>,
@@ -52,6 +59,25 @@ pub async fn wake_cancel(
             wake::wake_cancel_core(&state.db, params.source_conversation_id, params.id)
                 .await
                 .map_err(AppCommandError::from)?,
+        )
+        .expect("wake serialize"),
+    ))
+}
+
+pub async fn wake_update(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<UpdateWake>,
+) -> Result<Json<serde_json::Value>, AppCommandError> {
+    Ok(Json(
+        serde_json::to_value(
+            wake::wake_update_core(
+                &state.db,
+                params.source_conversation_id,
+                params.id,
+                params.draft,
+            )
+            .await
+            .map_err(AppCommandError::from)?,
         )
         .expect("wake serialize"),
     ))

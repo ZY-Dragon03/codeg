@@ -12,6 +12,7 @@ pub const STATUS_PENDING: &str = "pending";
 pub const STATUS_DISPATCHING: &str = "dispatching";
 pub const STATUS_SENT: &str = "sent";
 pub const STATUS_FAILED: &str = "failed";
+pub const STATUS_CANCELLED: &str = "cancelled";
 pub const TRIGGER_AFTER: &str = "timer_after";
 pub const TRIGGER_AT: &str = "timer_at";
 pub const TRIGGER_PROCESS_EXIT: &str = "process_exit";
@@ -100,8 +101,57 @@ pub async fn cancel(
         .await?
         .ok_or_else(|| DbError::NotFound(format!("agent_wake {id}")))?;
     let mut active: agent_wake::ActiveModel = row.into();
-    active.status = Set(STATUS_FAILED.to_owned());
+    active.status = Set(STATUS_CANCELLED.to_owned());
     active.error = Set(Some("cancelled".into()));
+    active.updated_at = Set(Utc::now());
+    Ok(active.update(db).await?)
+}
+
+pub async fn update(
+    db: &DatabaseConnection,
+    source_conversation_id: i32,
+    id: i32,
+    input: CreateWake,
+) -> Result<agent_wake::Model, DbError> {
+    if input.source_conversation_id != source_conversation_id {
+        return Err(DbError::Validation(
+            "wake source conversation does not match update owner".into(),
+        ));
+    }
+    if input.prompt.trim().is_empty() {
+        return Err(DbError::Validation("wake prompt must not be empty".into()));
+    }
+    if input.trigger_kind == TRIGGER_PROCESS_EXIT && input.terminal_id.is_none() {
+        return Err(DbError::Validation(
+            "process exit wake requires terminal_id".into(),
+        ));
+    }
+    let row = agent_wake::Entity::find_by_id(id)
+        .filter(agent_wake::Column::SourceConversationId.eq(source_conversation_id))
+        .one(db)
+        .await?
+        .ok_or_else(|| DbError::NotFound(format!("agent_wake {id}")))?;
+    if !matches!(row.status.as_str(), STATUS_PENDING | STATUS_DISPATCHING) {
+        return Err(DbError::Validation(
+            "fired or already cancelled wakes cannot be cancelled again".into(),
+        ));
+    }
+    if !matches!(row.status.as_str(), STATUS_PENDING | STATUS_DISPATCHING) {
+        return Err(DbError::Validation(
+            "fired or cancelled wakes cannot be edited".into(),
+        ));
+    }
+    let mut active: agent_wake::ActiveModel = row.into();
+    active.source_connection_id = Set(input.source_connection_id);
+    active.terminal_id = Set(input.terminal_id);
+    active.process_ref = Set(input.process_ref);
+    active.trigger_kind = Set(input.trigger_kind);
+    active.fire_at = Set(input.fire_at);
+    active.prompt = Set(input.prompt.trim().to_owned());
+    active.status = Set(STATUS_PENDING.to_owned());
+    active.claimed_at = Set(None);
+    active.consumed_at = Set(None);
+    active.error = Set(None);
     active.updated_at = Set(Utc::now());
     Ok(active.update(db).await?)
 }
@@ -147,13 +197,31 @@ pub async fn claim_process_exit(
     db: &DatabaseConnection,
     terminal_id: &str,
 ) -> Result<Vec<agent_wake::Model>, DbError> {
+    claim_process_exit_for_source(db, terminal_id, None, None).await
+}
+
+pub async fn claim_process_exit_for_source(
+    db: &DatabaseConnection,
+    terminal_id: &str,
+    source_conversation_id: Option<i32>,
+    source_connection_id: Option<&str>,
+) -> Result<Vec<agent_wake::Model>, DbError> {
     let txn = db.begin().await?;
-    let rows = agent_wake::Entity::find()
+    let mut query = agent_wake::Entity::find()
         .filter(agent_wake::Column::Status.eq(STATUS_PENDING))
         .filter(agent_wake::Column::TriggerKind.eq(TRIGGER_PROCESS_EXIT))
-        .filter(agent_wake::Column::TerminalId.eq(terminal_id))
-        .all(&txn)
-        .await?;
+        .filter(agent_wake::Column::TerminalId.eq(terminal_id));
+    if let Some(source_conversation_id) = source_conversation_id {
+        query = query.filter(
+            agent_wake::Column::SourceConversationId.eq(source_conversation_id),
+        );
+    }
+    if let Some(source_connection_id) = source_connection_id {
+        query = query.filter(
+            agent_wake::Column::SourceConnectionId.eq(source_connection_id),
+        );
+    }
+    let rows = query.all(&txn).await?;
     let now = Utc::now();
     let mut claimed = Vec::with_capacity(rows.len());
     for row in rows {
@@ -252,7 +320,7 @@ mod tests {
             creator_id: None,
         }).await.unwrap();
         let cancelled = cancel(&db.conn, source, row.id).await.unwrap();
-        assert_eq!(cancelled.status, STATUS_FAILED);
+        assert_eq!(cancelled.status, STATUS_CANCELLED);
         assert_eq!(cancelled.error.as_deref(), Some("cancelled"));
         assert!(claim_due(&db.conn, Utc::now() + chrono::Duration::days(1), 10).await.unwrap().is_empty());
     }

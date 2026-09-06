@@ -15,41 +15,47 @@ use async_trait::async_trait;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::RwLock;
 
+use crate::acp::chat_authoring::{AuthoringContext, AuthoringOutcome, ChatAuthoringAccess};
 use crate::acp::delegation::broker::{DelegationBroker, StatusWait};
 use crate::acp::delegation::transport::{
     read_frame, write_frame, BrokerAskRequest, BrokerCancelRequest, BrokerCancelTaskRequest,
-    BrokerCommitFeedbackRequest, BrokerFeedbackRequest, BrokerMessage, BrokerRequest,
-    BrokerCreateAutomationRequest, BrokerCreateWorkTaskRequest, BrokerResponse,
-    BrokerResumeTaskRequest, BrokerSessionRequest, BrokerStatusRequest,
-    BrokerTaskCompleteRequest, BrokerTaskProgressRequest,
-    BrokerSendToConversationRequest, BrokerReadConversationContextRequest,
-    BrokerWakeRequest, BrokerListWakesRequest, BrokerCancelWakeRequest,
+    BrokerCancelWakeRequest, BrokerCommitFeedbackRequest, BrokerCreateAutomationRequest,
+    BrokerCreateEventAutomationRequest, BrokerCreateWorkTaskRequest,
+    BrokerDeleteOrCancelEventAutomationRequest, BrokerFeedbackRequest,
+    BrokerListEventAutomationsRequest, BrokerListWakesRequest, BrokerMessage,
+    BrokerReadConversationContextRequest, BrokerRequest, BrokerResponse, BrokerResumeTaskRequest,
+    BrokerSendToConversationRequest, BrokerSessionRequest, BrokerStatusRequest,
+    BrokerTaskCompleteRequest, BrokerTaskProgressRequest, BrokerUpdateEventAutomationRequest,
+    BrokerWakeRequest,
 };
 use crate::acp::delegation::types::{
     DelegationRequest, DelegationTaskReport, ResumeDelegationRequest, TaskStatus,
 };
 use crate::acp::feedback::{PendingFeedback, SessionFeedbackAccess};
-use crate::acp::question::{QuestionOutcome, SessionQuestionAccess};
-use crate::acp::chat_authoring::{AuthoringContext, AuthoringOutcome, ChatAuthoringAccess};
-use crate::acp::session_info::{SessionInfo, SessionInfoAccess};
-use crate::acp::work_task_tools::{TaskReportAck, WorkTaskToolAccess};
-use crate::acp::types::PromptInputBlock;
-use crate::models::AgentType;
-use serde_json::Value;
 use crate::acp::manager::ConnectionManager;
-use crate::db::service::agent_wake_service::{self, CreateWake, TRIGGER_AFTER, TRIGGER_AT, TRIGGER_PROCESS_EXIT};
-use crate::db::AppDatabase;
+use crate::acp::question::{QuestionOutcome, SessionQuestionAccess};
+use crate::acp::session_info::{SessionInfo, SessionInfoAccess};
+use crate::acp::types::PromptInputBlock;
+use crate::acp::work_task_tools::{TaskReportAck, WorkTaskToolAccess};
+use crate::commands::event_rule as event_rule_commands;
 use crate::db::entities::{conversation, event_rule};
+use crate::db::service::agent_wake_service::{
+    self, CreateWake, TRIGGER_AFTER, TRIGGER_AT, TRIGGER_PROCESS_EXIT,
+};
+use crate::db::AppDatabase;
 use crate::event_rules::types::{ConversationRef, EventRuleConfig, RuleScope};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use crate::event_rules::EventRulesEngineHandle;
+use crate::models::AgentType;
+use crate::models::EventRuleDraft;
 use chrono::{Duration as ChronoDuration, Utc};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use serde_json::Value;
 
 /// Hard ceiling on a *positive* `get_delegation_status` long-poll, so a single
 /// MCP tool call can't block the companion's round-trip unbounded. The child
 /// keeps running past this; the LLM simply re-issues the wait. An explicit
 /// `wait_ms = 0` opts out of the ceiling and blocks until the task is terminal.
 const STATUS_WAIT_MAX_MS: u64 = 60_000;
-
 
 /// Pluggable "what conversation is this parent currently in?" lookup. The
 /// production impl wraps `ConnectionManager.get_state`; tests use an
@@ -69,6 +75,21 @@ pub trait EventAutomationAccess: Send + Sync {
     async fn wake(&self, req: BrokerWakeRequest) -> Value;
     async fn list_wakes(&self, req: BrokerListWakesRequest) -> Value;
     async fn cancel_wake(&self, req: BrokerCancelWakeRequest) -> Value;
+    async fn create_event_automation(&self, _req: BrokerCreateEventAutomationRequest) -> Value {
+        serde_json::json!({"ok": false, "error": "event automation CRUD unavailable"})
+    }
+    async fn list_event_automations(&self, _req: BrokerListEventAutomationsRequest) -> Value {
+        serde_json::json!({"ok": false, "error": "event automation CRUD unavailable"})
+    }
+    async fn update_event_automation(&self, _req: BrokerUpdateEventAutomationRequest) -> Value {
+        serde_json::json!({"ok": false, "error": "event automation CRUD unavailable"})
+    }
+    async fn delete_or_cancel_event_automation(
+        &self,
+        _req: BrokerDeleteOrCancelEventAutomationRequest,
+    ) -> Value {
+        serde_json::json!({"ok": false, "error": "event automation CRUD unavailable"})
+    }
 }
 
 /// Production adapter for the event-automation MCP tools. The parent
@@ -80,6 +101,7 @@ pub struct ConnectionEventAutomationAccess {
     pub tokens: Arc<TokenRegistry>,
     pub parent_lookup: Arc<dyn ParentSessionLookup>,
     pub session_info: Arc<dyn SessionInfoAccess>,
+    pub event_rules_engine: EventRulesEngineHandle,
 }
 
 impl ConnectionEventAutomationAccess {
@@ -107,6 +129,12 @@ impl ConnectionEventAutomationAccess {
             .await
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("source conversation {source_id} not found"))?;
+        let target = conversation::Entity::find_by_id(target_id)
+            .filter(conversation::Column::DeletedAt.is_null())
+            .one(&self.db.conn)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("target conversation {target_id} not found"))?;
         let rules = event_rule::Entity::find()
             .filter(event_rule::Column::Enabled.eq(true))
             .all(&self.db.conn)
@@ -122,21 +150,55 @@ impl ConnectionEventAutomationAccess {
                 RuleScope::Folder { folder_id } => *folder_id == source.folder_id,
                 RuleScope::AgentType { agent_type } => agent_type == &source.agent_type,
             };
-            if !scope_matches {
+            // A rule is an explicit capability envelope. The normal direction
+            // authorizes source -> target; the reverse check lets a completion
+            // reviewer send a follow-up back to its worker when the worker's
+            // rule explicitly selected the reviewer as a target.
+            let reverse_scope_matches = match &config.scope {
+                RuleScope::Global => true,
+                RuleScope::Conversation { conversation_id } => *conversation_id == target_id,
+                RuleScope::Folder { folder_id } => *folder_id == target.folder_id,
+                RuleScope::AgentType { agent_type } => agent_type == &target.agent_type,
+            };
+            let explicit_target = config.action.target_conversation_ids.contains(&target_id)
+                || (matches!(
+                    config.action.conversation_ref,
+                    ConversationRef::SpecificConversation
+                ) && config.action.conversation_id == Some(target_id));
+            let reverse_target = config.action.target_conversation_ids.contains(&source_id)
+                || (matches!(
+                    config.action.conversation_ref,
+                    ConversationRef::SpecificConversation
+                ) && config.action.conversation_id == Some(source_id));
+            if (!scope_matches || !explicit_target) && (!reverse_scope_matches || !reverse_target) {
                 continue;
             }
-            if config.action.target_conversation_ids.contains(&target_id)
-                || (matches!(config.action.conversation_ref, ConversationRef::SpecificConversation)
-                    && config.action.conversation_id == Some(target_id))
-            {
-                return Ok(true);
-            }
+            return Ok(true);
         }
         Ok(false)
     }
 
     async fn error_response(error: impl Into<String>) -> Value {
         serde_json::json!({"ok": false, "error": error.into()})
+    }
+
+    async fn validate_agent_targets(
+        &self,
+        source_id: i32,
+        draft: &EventRuleDraft,
+    ) -> Result<(), String> {
+        let mut targets = draft.config.action.target_conversation_ids.clone();
+        if let Some(target) = draft.config.action.conversation_id {
+            targets.push(target);
+        }
+        targets.sort_unstable();
+        targets.dedup();
+        for target in targets {
+            if target != source_id && !self.target_allowed(source_id, target).await? {
+                return Err(format!("target conversation {target} is not authorized"));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -152,7 +214,10 @@ impl EventAutomationAccess for ConnectionEventAutomationAccess {
         }
         match self.target_allowed(source_id, req.conversation_id).await {
             Ok(true) => {}
-            Ok(false) => return Self::error_response("target is not authorized by an enabled event rule").await,
+            Ok(false) => {
+                return Self::error_response("target is not authorized by an enabled event rule")
+                    .await
+            }
             Err(error) => return Self::error_response(error).await,
         }
         let target = match conversation::Entity::find_by_id(req.conversation_id)
@@ -213,7 +278,10 @@ impl EventAutomationAccess for ConnectionEventAutomationAccess {
         };
         match self.target_allowed(source_id, req.conversation_id).await {
             Ok(true) => {}
-            Ok(false) => return Self::error_response("target is not authorized by an enabled event rule").await,
+            Ok(false) => {
+                return Self::error_response("target is not authorized by an enabled event rule")
+                    .await
+            }
             Err(error) => return Self::error_response(error).await,
         }
         let info = self
@@ -234,7 +302,12 @@ impl EventAutomationAccess for ConnectionEventAutomationAccess {
                 let Some(duration_ms) = req.duration_ms.filter(|value| *value > 0) else {
                     return Self::error_response("wake_after requires duration_ms > 0").await;
                 };
-                (Some(now + ChronoDuration::milliseconds(duration_ms.min(i64::MAX as u64) as i64)), None)
+                (
+                    Some(
+                        now + ChronoDuration::milliseconds(duration_ms.min(i64::MAX as u64) as i64),
+                    ),
+                    None,
+                )
             }
             TRIGGER_AT => {
                 let Some(at) = req.at.filter(|value| *value > now) else {
@@ -243,16 +316,25 @@ impl EventAutomationAccess for ConnectionEventAutomationAccess {
                 (Some(at), None)
             }
             TRIGGER_PROCESS_EXIT => {
-                // TokenEntry currently binds only the parent connection, while
-                // terminal ids are minted/tracked by the terminal manager and
-                // are not exposed through a conversation-scoped authorization
-                // lookup. Accepting a caller supplied id would allow waking on
-                // another session's process. Fail closed until that identity
-                // binding exists.
-                return Self::error_response(
-                    "wake_on_process_exit is unavailable until terminal identity is verified",
-                )
-                .await;
+                let Some(scheduler) = self.manager.wake_scheduler_snapshot() else {
+                    return Self::error_response(
+                        "wake_on_process_exit is unavailable before the wake scheduler starts",
+                    )
+                    .await;
+                };
+                let Some(terminal_id) = req.process_ref.clone() else {
+                    return Self::error_response(
+                        "wake_on_process_exit requires the terminal id returned by terminal/create",
+                    )
+                    .await;
+                };
+                if !scheduler.terminal_owned_by(&terminal_id, &entry.parent_connection_id) {
+                    return Self::error_response(
+                        "terminal id is not owned by the current agent conversation",
+                    )
+                    .await;
+                }
+                (None, Some(terminal_id))
             }
             _ => return Self::error_response("unknown wake trigger").await,
         };
@@ -294,6 +376,125 @@ impl EventAutomationAccess for ConnectionEventAutomationAccess {
             Err(error) => Self::error_response(error.to_string()).await,
         }
     }
+
+    async fn create_event_automation(&self, req: BrokerCreateEventAutomationRequest) -> Value {
+        let (_entry, source_id) = match self.source(&req.token).await {
+            Ok(value) => value,
+            Err(error) => return Self::error_response(error).await,
+        };
+        let mut draft = req.draft;
+        draft.creator_kind = Some("agent".into());
+        draft.creator_conversation_id = Some(source_id);
+        if let Err(error) = self.validate_agent_targets(source_id, &draft).await {
+            return Self::error_response(error).await;
+        }
+        match event_rule_commands::event_rule_create_core(&self.db, &self.event_rules_engine, draft)
+            .await
+        {
+            Ok(rule) => serde_json::json!({"ok": true, "automation": rule}),
+            Err(error) => Self::error_response(error.to_string()).await,
+        }
+    }
+
+    async fn list_event_automations(&self, req: BrokerListEventAutomationsRequest) -> Value {
+        let (_entry, source_id) = match self.source(&req.token).await {
+            Ok(value) => value,
+            Err(error) => return Self::error_response(error).await,
+        };
+        match crate::db::service::event_rule_service::list(&self.db.conn).await {
+            Ok(rows) => {
+                let rows = rows
+                    .into_iter()
+                    .filter(|row| {
+                        row.creator_kind == "agent"
+                            && row.creator_conversation_id == Some(source_id)
+                    })
+                    .collect::<Vec<_>>();
+                serde_json::json!({"ok": true, "automations": rows})
+            }
+            Err(error) => Self::error_response(error.to_string()).await,
+        }
+    }
+
+    async fn update_event_automation(&self, req: BrokerUpdateEventAutomationRequest) -> Value {
+        let (_entry, source_id) = match self.source(&req.token).await {
+            Ok(value) => value,
+            Err(error) => return Self::error_response(error).await,
+        };
+        let current = match crate::db::service::event_rule_service::get(&self.db.conn, req.id).await
+        {
+            Ok(row) => row,
+            Err(error) => return Self::error_response(error.to_string()).await,
+        };
+        if current.creator_kind != "agent" || current.creator_conversation_id != Some(source_id) {
+            return Self::error_response("event automation is not owned by this conversation")
+                .await;
+        }
+        let result = if let Some(mut draft) = req.draft {
+            draft.creator_kind = Some("agent".into());
+            draft.creator_conversation_id = Some(source_id);
+            if let Err(error) = self.validate_agent_targets(source_id, &draft).await {
+                return Self::error_response(error).await;
+            }
+            event_rule_commands::event_rule_update_core(
+                &self.db,
+                &self.event_rules_engine,
+                req.id,
+                draft,
+            )
+            .await
+        } else if let Some(enabled) = req.enabled {
+            event_rule_commands::event_rule_set_enabled_core(
+                &self.db,
+                &self.event_rules_engine,
+                req.id,
+                enabled,
+            )
+            .await
+        } else {
+            return Self::error_response("provide enabled or draft").await;
+        };
+        match result {
+            Ok(rule) => serde_json::json!({"ok": true, "automation": rule}),
+            Err(error) => Self::error_response(error.to_string()).await,
+        }
+    }
+
+    async fn delete_or_cancel_event_automation(
+        &self,
+        req: BrokerDeleteOrCancelEventAutomationRequest,
+    ) -> Value {
+        let (_entry, source_id) = match self.source(&req.token).await {
+            Ok(value) => value,
+            Err(error) => return Self::error_response(error).await,
+        };
+        if req.kind.as_deref() == Some("wake") {
+            return match agent_wake_service::cancel(&self.db.conn, source_id, req.id).await {
+                Ok(row) => serde_json::json!({"ok": true, "wake": row}),
+                Err(error) => Self::error_response(error.to_string()).await,
+            };
+        }
+        let current = match crate::db::service::event_rule_service::get(&self.db.conn, req.id).await
+        {
+            Ok(row) => row,
+            Err(error) => return Self::error_response(error.to_string()).await,
+        };
+        if current.creator_kind != "agent" || current.creator_conversation_id != Some(source_id) {
+            return Self::error_response("event automation is not owned by this conversation")
+                .await;
+        }
+        match event_rule_commands::event_rule_delete_core(
+            &self.db,
+            &self.event_rules_engine,
+            req.id,
+        )
+        .await
+        {
+            Ok(()) => serde_json::json!({"ok": true, "deleted": req.id}),
+            Err(error) => Self::error_response(error.to_string()).await,
+        }
+    }
+
 }
 
 /// Per-launch token entry. Bound at MCP injection time and revoked on parent
@@ -494,10 +695,7 @@ impl DelegationListener {
                         write_frame(conn, &feedback_response(&[])?).await?;
                     }
                     Some(parent_conn_id) => {
-                        let pending = self
-                            .feedback
-                            .read_pending_feedback(&parent_conn_id)
-                            .await;
+                        let pending = self.feedback.read_pending_feedback(&parent_conn_id).await;
                         // Read-only: the response carries the note ids
                         // (`_commit_ids`); delivery is committed LATER, by the
                         // companion's `CommitFeedback` once it actually returns
@@ -605,7 +803,21 @@ impl DelegationListener {
             }
             BrokerMessage::Wake(req) => generic_response(self.process_wake(req).await)?,
             BrokerMessage::ListWakes(req) => generic_response(self.process_list_wakes(req).await)?,
-            BrokerMessage::CancelWake(req) => generic_response(self.process_cancel_wake(req).await)?,
+            BrokerMessage::CancelWake(req) => {
+                generic_response(self.process_cancel_wake(req).await)?
+            }
+            BrokerMessage::CreateEventAutomation(req) => {
+                generic_response(self.process_create_event_automation(req).await)?
+            }
+            BrokerMessage::ListEventAutomations(req) => {
+                generic_response(self.process_list_event_automations(req).await)?
+            }
+            BrokerMessage::UpdateEventAutomation(req) => {
+                generic_response(self.process_update_event_automation(req).await)?
+            }
+            BrokerMessage::DeleteOrCancelEventAutomation(req) => {
+                generic_response(self.process_delete_or_cancel_event_automation(req).await)?
+            }
             BrokerMessage::Cancel(cancel) => {
                 self.process_cancel(cancel).await;
                 // Empty ack — the companion only uses this to detect the
@@ -964,7 +1176,10 @@ impl DelegationListener {
         access.send_to_conversation(req).await
     }
 
-    async fn process_read_conversation_context(&self, req: BrokerReadConversationContextRequest) -> Value {
+    async fn process_read_conversation_context(
+        &self,
+        req: BrokerReadConversationContextRequest,
+    ) -> Value {
         let Some(access) = self.event_automation.read().await.clone() else {
             return serde_json::json!({"ok": false, "error": "event automation access unavailable"});
         };
@@ -990,6 +1205,46 @@ impl DelegationListener {
             return serde_json::json!({"ok": false, "error": "event automation access unavailable"});
         };
         access.cancel_wake(req).await
+    }
+
+    async fn process_create_event_automation(
+        &self,
+        req: BrokerCreateEventAutomationRequest,
+    ) -> Value {
+        let Some(access) = self.event_automation.read().await.clone() else {
+            return serde_json::json!({"ok": false, "error": "event automation access unavailable"});
+        };
+        access.create_event_automation(req).await
+    }
+
+    async fn process_list_event_automations(
+        &self,
+        req: BrokerListEventAutomationsRequest,
+    ) -> Value {
+        let Some(access) = self.event_automation.read().await.clone() else {
+            return serde_json::json!({"ok": false, "error": "event automation access unavailable"});
+        };
+        access.list_event_automations(req).await
+    }
+
+    async fn process_update_event_automation(
+        &self,
+        req: BrokerUpdateEventAutomationRequest,
+    ) -> Value {
+        let Some(access) = self.event_automation.read().await.clone() else {
+            return serde_json::json!({"ok": false, "error": "event automation access unavailable"});
+        };
+        access.update_event_automation(req).await
+    }
+
+    async fn process_delete_or_cancel_event_automation(
+        &self,
+        req: BrokerDeleteOrCancelEventAutomationRequest,
+    ) -> Value {
+        let Some(access) = self.event_automation.read().await.clone() else {
+            return serde_json::json!({"ok": false, "error": "event automation access unavailable"});
+        };
+        access.delete_or_cancel_event_automation(req).await
     }
 }
 
@@ -1216,10 +1471,7 @@ mod tests {
     }
     #[async_trait]
     impl SessionFeedbackAccess for StubFeedback {
-        async fn read_pending_feedback(
-            &self,
-            parent_connection_id: &str,
-        ) -> Vec<PendingFeedback> {
+        async fn read_pending_feedback(&self, parent_connection_id: &str) -> Vec<PendingFeedback> {
             *self.read_conn.lock().await = Some(parent_connection_id.to_string());
             self.items.lock().await.clone()
         }
@@ -1239,9 +1491,7 @@ mod tests {
     #[derive(Default)]
     struct StubQuestion {
         pending: tokio::sync::Mutex<HashMap<String, oneshot::Sender<QuestionOutcome>>>,
-        registered: tokio::sync::Mutex<
-            Vec<(String, Vec<crate::acp::question::QuestionSpec>)>,
-        >,
+        registered: tokio::sync::Mutex<Vec<(String, Vec<crate::acp::question::QuestionSpec>)>>,
         canceled: tokio::sync::Mutex<Vec<String>>,
     }
     #[async_trait]
@@ -2069,7 +2319,8 @@ mod tests {
         }
 
         let mock = Arc::new(MockSpawner::new());
-        mock.queue_resume_spawn(Ok(ResumedSpawn::fresh("child-conn-2"))).await;
+        mock.queue_resume_spawn(Ok(ResumedSpawn::fresh("child-conn-2")))
+            .await;
         mock.queue_resume_send(Ok(())).await;
         let broker = Arc::new(
             DelegationBroker::new(
@@ -2318,7 +2569,10 @@ mod tests {
         let commit_ids = resp.outcome["_commit_ids"].as_array().unwrap();
         assert_eq!(commit_ids, &vec!["f1", "f2"]);
         // Read was scoped to the token's parent connection id.
-        assert_eq!(feedback.read_conn.lock().await.as_deref(), Some("parent-conn"));
+        assert_eq!(
+            feedback.read_conn.lock().await.as_deref(),
+            Some("parent-conn")
+        );
         // The Feedback arm is READ-ONLY — it does NOT commit (delivery is
         // committed later, by the companion's CommitFeedback).
         assert!(feedback.committed.lock().await.is_empty());
@@ -2762,7 +3016,10 @@ mod tests {
             .await
             .expect("serve_one must return after peer close");
         result.unwrap().unwrap();
-        assert_eq!(questions.canceled.lock().await.as_slice(), &["q-1".to_string()]);
+        assert_eq!(
+            questions.canceled.lock().await.as_slice(),
+            &["q-1".to_string()]
+        );
     }
 
     /// An invalid token never registers a question and returns a `declined`
@@ -2770,7 +3027,8 @@ mod tests {
     #[tokio::test]
     async fn ask_invalid_token_declined() {
         let questions = Arc::new(StubQuestion::default());
-        let listener = make_question_listener(Arc::new(TokenRegistry::default()), questions.clone());
+        let listener =
+            make_question_listener(Arc::new(TokenRegistry::default()), questions.clone());
         let (mut client, mut server) = duplex(8 * 1024);
         let server_task = tokio::spawn(async move {
             listener.serve_one(&mut server).await.unwrap();
@@ -2783,5 +3041,4 @@ mod tests {
         assert_eq!(resp.outcome["declined"], true);
         assert!(questions.registered.lock().await.is_empty());
     }
-
 }

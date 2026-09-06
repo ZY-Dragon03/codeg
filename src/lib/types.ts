@@ -1643,7 +1643,7 @@ export type AutomationRegistryProvenance = "user" | "agent" | "builtin" | string
 export type WakeSchedule =
   | { kind: "after"; delay_ms: number }
   | { kind: "at"; at: string }
-  | { kind: "process_exit"; process_id?: number | null }
+  | { kind: "process_exit"; process_id?: string | number | null }
 export interface WakeRecord {
   id: number
   name: string

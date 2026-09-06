@@ -45,19 +45,23 @@ use crate::acp::chat_authoring::{
     NewAutomationSpec, NewWorkTaskSpec, MAX_PROMPT_CHARS, MAX_TITLE_CHARS,
 };
 use crate::acp::delegation::transport::{
-    client_ask_round_trip, client_cancel, client_cancel_task_round_trip, client_commit_feedback,
-    client_create_automation_round_trip, client_create_work_task_round_trip,
-    client_feedback_round_trip, client_resume_task_round_trip, client_round_trip,
-    client_session_round_trip, client_status_round_trip, client_task_complete_round_trip,
-    client_task_progress_round_trip, BrokerAskRequest, BrokerCancelRequest,
-    BrokerCancelTaskRequest, BrokerCommitFeedbackRequest, BrokerCreateAutomationRequest,
-    BrokerCreateWorkTaskRequest, BrokerFeedbackRequest, BrokerRequest, BrokerResponse,
-    BrokerResumeTaskRequest, BrokerSessionRequest, BrokerStatusRequest,
-    BrokerTaskCompleteRequest, BrokerTaskProgressRequest, BrokerSendToConversationRequest,
-    BrokerReadConversationContextRequest, BrokerWakeRequest, BrokerListWakesRequest,
-    BrokerCancelWakeRequest, client_send_to_conversation_round_trip,
-    client_read_conversation_context_round_trip, client_wake_round_trip,
-    client_list_wakes_round_trip, client_cancel_wake_round_trip,
+    client_ask_round_trip, client_cancel, client_cancel_task_round_trip,
+    client_cancel_wake_round_trip, client_commit_feedback, client_create_automation_round_trip,
+    client_create_event_automation_round_trip, client_create_work_task_round_trip,
+    client_delete_or_cancel_event_automation_round_trip, client_feedback_round_trip,
+    client_list_event_automations_round_trip, client_list_wakes_round_trip,
+    client_read_conversation_context_round_trip, client_resume_task_round_trip, client_round_trip,
+    client_send_to_conversation_round_trip, client_session_round_trip, client_status_round_trip,
+    client_task_complete_round_trip, client_task_progress_round_trip,
+    client_update_event_automation_round_trip, client_wake_round_trip, BrokerAskRequest,
+    BrokerCancelRequest, BrokerCancelTaskRequest, BrokerCancelWakeRequest,
+    BrokerCommitFeedbackRequest, BrokerCreateAutomationRequest, BrokerCreateEventAutomationRequest,
+    BrokerCreateWorkTaskRequest, BrokerDeleteOrCancelEventAutomationRequest, BrokerFeedbackRequest,
+    BrokerListEventAutomationsRequest, BrokerListWakesRequest,
+    BrokerReadConversationContextRequest, BrokerRequest, BrokerResponse, BrokerResumeTaskRequest,
+    BrokerSendToConversationRequest, BrokerSessionRequest, BrokerStatusRequest,
+    BrokerTaskCompleteRequest, BrokerTaskProgressRequest, BrokerUpdateEventAutomationRequest,
+    BrokerWakeRequest,
 };
 use crate::acp::question::parse_questions;
 use crate::acp::session_info::MAX_SESSION_MESSAGES;
@@ -215,17 +219,28 @@ impl CompanionFeatures {
             "check_user_feedback" => self.feedback,
             "ask_user_question" => self.ask,
             "get_session_info" => self.sessions,
-            "send_to_conversation" | "read_conversation_context" | "wake_after"
-            | "wake_at" | "wake_on_process_exit" | "list_wakes" | "cancel_wake" => {
+            "send_to_conversation"
+            | "read_conversation_context"
+            | "wake_after"
+            | "wake_at"
+            | "wake_on_process_exit"
+            | "list_wakes"
+            | "cancel_wake" => {
                 // These capabilities are part of the authenticated parent
                 // delegation channel. They do not depend on the optional
                 // transcript/session-info toggle.
                 self.event_automation
             }
+            "create_event_automation"
+            | "list_event_automations"
+            | "update_event_automation"
+            | "delete_or_cancel_event_automation" => self.event_automation,
             "task_progress" | "task_complete" => self.tasks,
             "create_automation" => self.automations,
             "create_work_task" => self.taskboard,
-            "delegate_to_agent" | "get_delegation_status" | "cancel_delegation"
+            "delegate_to_agent"
+            | "get_delegation_status"
+            | "cancel_delegation"
             | "resume_delegation" => self.delegation,
             _ => false,
         }
@@ -704,25 +719,51 @@ async fn build_tools_call_spawn(
             register_and_spawn(inflight, id, None, round_trip, render_session_result).await
         }
         "send_to_conversation" => {
-            let Some(conversation_id) = arguments.get("conversation_id").and_then(Value::as_i64).map(|v| v as i32) else {
-                return LineAction::Respond(err(id, -32602, "send_to_conversation requires integer conversation_id"));
+            let Some(conversation_id) = arguments
+                .get("conversation_id")
+                .and_then(Value::as_i64)
+                .map(|v| v as i32)
+            else {
+                return LineAction::Respond(err(
+                    id,
+                    -32602,
+                    "send_to_conversation requires integer conversation_id",
+                ));
             };
-            let Some(prompt) = arguments.get("prompt").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) else {
-                return LineAction::Respond(err(id, -32602, "send_to_conversation requires non-empty prompt"));
+            let Some(prompt) = arguments
+                .get("prompt")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+            else {
+                return LineAction::Respond(err(
+                    id,
+                    -32602,
+                    "send_to_conversation requires non-empty prompt",
+                ));
             };
             let req = BrokerSendToConversationRequest {
                 token: ctx.token.clone(),
                 conversation_id,
                 prompt: prompt.to_owned(),
             };
-            let round_trip = Box::pin(async move {
-                client_send_to_conversation_round_trip(&socket, &req).await
-            });
+            let round_trip =
+                Box::pin(
+                    async move { client_send_to_conversation_round_trip(&socket, &req).await },
+                );
             register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
         }
         "read_conversation_context" => {
-            let Some(conversation_id) = arguments.get("conversation_id").and_then(Value::as_i64).map(|v| v as i32) else {
-                return LineAction::Respond(err(id, -32602, "read_conversation_context requires integer conversation_id"));
+            let Some(conversation_id) = arguments
+                .get("conversation_id")
+                .and_then(Value::as_i64)
+                .map(|v| v as i32)
+            else {
+                return LineAction::Respond(err(
+                    id,
+                    -32602,
+                    "read_conversation_context requires integer conversation_id",
+                ));
             };
             let req = BrokerReadConversationContextRequest {
                 token: ctx.token.clone(),
@@ -735,7 +776,12 @@ async fn build_tools_call_spawn(
             register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
         }
         "wake_after" | "wake_at" | "wake_on_process_exit" => {
-            let Some(prompt) = arguments.get("prompt").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()) else {
+            let Some(prompt) = arguments
+                .get("prompt")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+            else {
                 return LineAction::Respond(err(id, -32602, "wake tool requires non-empty prompt"));
             };
             let trigger_kind = match name.as_str() {
@@ -748,9 +794,16 @@ async fn build_tools_call_spawn(
                 .get("at")
                 .and_then(Value::as_str)
                 .and_then(|value| value.parse::<chrono::DateTime<chrono::Utc>>().ok());
-            let terminal_id = arguments.get("terminal_id").and_then(Value::as_str).map(str::to_owned);
+            let terminal_id = arguments
+                .get("terminal_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
             if trigger_kind == "process_exit" && terminal_id.is_none() {
-                return LineAction::Respond(err(id, -32602, "wake_on_process_exit requires terminal_id"));
+                return LineAction::Respond(err(
+                    id,
+                    -32602,
+                    "wake_on_process_exit requires terminal_id",
+                ));
             }
             let req = BrokerWakeRequest {
                 token: ctx.token.clone(),
@@ -758,23 +811,127 @@ async fn build_tools_call_spawn(
                 duration_ms,
                 at,
                 terminal_id,
-                process_ref: arguments.get("process_ref").and_then(Value::as_str).map(str::to_owned),
+                process_ref: arguments
+                    .get("process_ref")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
                 prompt: prompt.to_owned(),
             };
             let round_trip = Box::pin(async move { client_wake_round_trip(&socket, &req).await });
             register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
         }
         "list_wakes" => {
-            let req = BrokerListWakesRequest { token: ctx.token.clone() };
-            let round_trip = Box::pin(async move { client_list_wakes_round_trip(&socket, &req).await });
+            let req = BrokerListWakesRequest {
+                token: ctx.token.clone(),
+            };
+            let round_trip =
+                Box::pin(async move { client_list_wakes_round_trip(&socket, &req).await });
             register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
         }
         "cancel_wake" => {
-            let Some(wake_id) = arguments.get("wake_id").and_then(Value::as_i64).map(|v| v as i32) else {
-                return LineAction::Respond(err(id, -32602, "cancel_wake requires integer wake_id"));
+            let Some(wake_id) = arguments
+                .get("wake_id")
+                .and_then(Value::as_i64)
+                .map(|v| v as i32)
+            else {
+                return LineAction::Respond(err(
+                    id,
+                    -32602,
+                    "cancel_wake requires integer wake_id",
+                ));
             };
-            let req = BrokerCancelWakeRequest { token: ctx.token.clone(), wake_id };
-            let round_trip = Box::pin(async move { client_cancel_wake_round_trip(&socket, &req).await });
+            let req = BrokerCancelWakeRequest {
+                token: ctx.token.clone(),
+                wake_id,
+            };
+            let round_trip =
+                Box::pin(async move { client_cancel_wake_round_trip(&socket, &req).await });
+            register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
+        }
+        "create_event_automation" => {
+            let draft = match serde_json::from_value(arguments.clone()) {
+                Ok(draft) => draft,
+                Err(error) => {
+                    return LineAction::Respond(err(
+                        id,
+                        -32602,
+                        format!("invalid event automation draft: {error}"),
+                    ))
+                }
+            };
+            let req = BrokerCreateEventAutomationRequest {
+                token: ctx.token.clone(),
+                draft,
+            };
+            let round_trip =
+                Box::pin(
+                    async move { client_create_event_automation_round_trip(&socket, &req).await },
+                );
+            register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
+        }
+        "list_event_automations" => {
+            let req = BrokerListEventAutomationsRequest {
+                token: ctx.token.clone(),
+            };
+            let round_trip =
+                Box::pin(
+                    async move { client_list_event_automations_round_trip(&socket, &req).await },
+                );
+            register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
+        }
+        "update_event_automation" => {
+            let Some(id_value) = arguments.get("id").and_then(Value::as_i64) else {
+                return LineAction::Respond(err(
+                    id,
+                    -32602,
+                    "update_event_automation requires integer id",
+                ));
+            };
+            let draft = arguments
+                .get("draft")
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|error| error.to_string());
+            let draft = match draft {
+                Ok(draft) => draft,
+                Err(error) => return LineAction::Respond(err(id, -32602, error)),
+            };
+            let enabled = arguments.get("enabled").and_then(Value::as_bool);
+            if draft.is_none() && enabled.is_none() {
+                return LineAction::Respond(err(id, -32602, "provide enabled or draft"));
+            }
+            let req = BrokerUpdateEventAutomationRequest {
+                token: ctx.token.clone(),
+                id: id_value as i32,
+                enabled,
+                draft,
+            };
+            let round_trip =
+                Box::pin(
+                    async move { client_update_event_automation_round_trip(&socket, &req).await },
+                );
+            register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
+        }
+        "delete_or_cancel_event_automation" => {
+            let Some(id_value) = arguments.get("id").and_then(Value::as_i64) else {
+                return LineAction::Respond(err(
+                    id,
+                    -32602,
+                    "delete_or_cancel_event_automation requires integer id",
+                ));
+            };
+            let req = BrokerDeleteOrCancelEventAutomationRequest {
+                token: ctx.token.clone(),
+                id: id_value as i32,
+                kind: arguments
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            };
+            let round_trip = Box::pin(async move {
+                client_delete_or_cancel_event_automation_round_trip(&socket, &req).await
+            });
             register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
         }
         "task_progress" => {
@@ -1723,20 +1880,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tools_list_returns_delegation_and_event_tools() {
+    async fn tools_list_returns_delegation_tools_without_event_gate() {
         let line = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#;
         let resp = unwrap_respond(dispatch_for_test(line).await);
         let result = resp.result.unwrap();
         let tools = result["tools"].as_array().unwrap();
-        // The delegation capability also exposes the authenticated event
-        // automation tools (send/read/wake/list/cancel) on the same parent
-        // channel.
-        assert_eq!(tools.len(), 11);
+        assert_eq!(tools.len(), 4);
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"delegate_to_agent"));
         assert!(names.contains(&"get_delegation_status"));
         assert!(names.contains(&"cancel_delegation"));
         assert!(names.contains(&"resume_delegation"));
+        assert!(!names.contains(&"send_to_conversation"));
         // resume_delegation requires only task_id; reason is optional and
         // there is deliberately NO task-text parameter (no new iterations).
         let resume = tools
@@ -2358,7 +2513,7 @@ mod tests {
             dispatch_for_test(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#).await,
         );
         assert!(!names.contains(&"check_user_feedback".to_string()));
-        assert_eq!(names.len(), 11);
+        assert_eq!(names.len(), 4);
     }
 
     #[tokio::test]
@@ -2367,7 +2522,7 @@ mod tests {
             dispatch_with_features(BOTH, r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#).await,
         );
         assert!(names.contains(&"check_user_feedback".to_string()));
-        assert_eq!(names.len(), 12);
+        assert_eq!(names.len(), 5);
     }
 
     #[tokio::test]
@@ -2387,6 +2542,10 @@ mod tests {
             "wake_on_process_exit",
             "list_wakes",
             "cancel_wake",
+            "create_event_automation",
+            "list_event_automations",
+            "update_event_automation",
+            "delete_or_cancel_event_automation",
         ] {
             assert!(names.iter().any(|actual| actual == name), "missing {name}");
         }
@@ -2476,7 +2635,10 @@ mod tests {
                 "params": { "name": "resume_delegation", "arguments": arguments }
             })
             .to_string();
-            assert!(matches!(dispatch_for_test(&line).await, LineAction::Spawn(_)));
+            assert!(matches!(
+                dispatch_for_test(&line).await,
+                LineAction::Spawn(_)
+            ));
         }
     }
 

@@ -9,6 +9,8 @@ pub struct Model {
     pub enabled: bool,
     pub priority: i32,
     pub builtin_key: Option<String>,
+    pub creator_kind: String,
+    pub creator_conversation_id: Option<i32>,
     #[sea_orm(column_type = "Text")]
     pub config: String,
     pub created_at: DateTimeUtc,

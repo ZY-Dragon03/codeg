@@ -438,6 +438,8 @@ pub struct TerminalRuntime {
     /// still direct-exec real programs, while shell command lines and shell
     /// builtins use this selected shell as their fallback.
     default_shell: TerminalShellRuntimeConfig,
+    process_exit_callback: Option<Arc<dyn Fn(String) + Send + Sync>>,
+    terminal_created_callback: Option<Arc<dyn Fn(String) + Send + Sync>>,
 }
 
 #[derive(Debug, Clone)]
@@ -460,6 +462,8 @@ impl TerminalRuntime {
             base_env,
             default_cwd: None,
             default_shell: TerminalShellRuntimeConfig::new(),
+            process_exit_callback: None,
+            terminal_created_callback: None,
         }
     }
 
@@ -478,6 +482,22 @@ impl TerminalRuntime {
         default_shell: TerminalShellRuntimeConfig,
     ) -> Self {
         self.default_shell = default_shell;
+        self
+    }
+
+    pub fn with_process_exit_callback(
+        mut self,
+        callback: Option<Arc<dyn Fn(String) + Send + Sync>>,
+    ) -> Self {
+        self.process_exit_callback = callback;
+        self
+    }
+
+    pub fn with_terminal_created_callback(
+        mut self,
+        callback: Option<Arc<dyn Fn(String) + Send + Sync>>,
+    ) -> Self {
+        self.terminal_created_callback = callback;
         self
     }
 
@@ -650,12 +670,23 @@ impl TerminalRuntime {
         // registered: the owner drains them before publishing the exit status,
         // and a command that exits instantly would otherwise drain an empty
         // list and leave the readers running past the published completion.
-        tokio::spawn(own_terminal_process(terminal.clone(), child));
+        let process_exit_callback = self.process_exit_callback.clone();
+        let process_exit_terminal_id = terminal_id.clone();
+        let owner_terminal = terminal.clone();
+        tokio::spawn(async move {
+            own_terminal_process(owner_terminal, child).await;
+            if let Some(callback) = process_exit_callback {
+                callback(process_exit_terminal_id);
+            }
+        });
 
         self.terminals
             .lock()
             .await
             .insert(terminal_id.clone(), terminal);
+        if let Some(callback) = &self.terminal_created_callback {
+            callback(terminal_id.clone());
+        }
 
         Ok(CreateTerminalResponse::new(terminal_id))
     }

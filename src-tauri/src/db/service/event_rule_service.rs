@@ -72,6 +72,8 @@ fn to_info(row: event_rule::Model) -> Result<EventRuleInfo, DbError> {
         enabled: row.enabled,
         priority: row.priority,
         builtin_key: row.builtin_key,
+        creator_kind: row.creator_kind,
+        creator_conversation_id: row.creator_conversation_id,
         config,
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -100,12 +102,20 @@ pub async fn create(
     draft: EventRuleDraft,
 ) -> Result<EventRuleInfo, DbError> {
     draft.config.validate().map_err(DbError::Validation)?;
+    let creator_kind = draft.creator_kind.unwrap_or_else(|| "user".into());
+    if !matches!(creator_kind.as_str(), "user" | "agent" | "builtin") {
+        return Err(DbError::Validation(
+            "creator_kind must be user, agent, or builtin".into(),
+        ));
+    }
     let now = Utc::now();
     let row = event_rule::ActiveModel {
         name: Set(draft.name),
         enabled: Set(draft.enabled),
         priority: Set(draft.priority),
         builtin_key: Set(None),
+        creator_kind: Set(creator_kind),
+        creator_conversation_id: Set(draft.creator_conversation_id),
         config: Set(
             serde_json::to_string(&draft.config).map_err(|e| DbError::Validation(e.to_string()))?
         ),
@@ -312,8 +322,7 @@ mod tests {
     use crate::db::test_helpers::{fresh_in_memory_db, seed_conversation, seed_folder};
     use crate::event_rules::types::{
         ActionKind, AutomationType, ConditionKind, ContainsMatchMode, ConversationRef,
-        LifecycleTrigger,
-        RuleAction, RuleCondition, RuleGuard,
+        LifecycleTrigger, RuleAction, RuleCondition, RuleGuard,
     };
     use crate::models::agent::AgentType;
 
@@ -329,9 +338,9 @@ mod tests {
                 text_contains: vec![],
                 regex: None,
                 error_kind: None,
-            error_severity: None,
-            error_title: None,
-            error_details: None,
+                error_severity: None,
+                error_title: None,
+                error_details: None,
             },
             action: RuleAction {
                 kind: ActionKind::SendToConversation,

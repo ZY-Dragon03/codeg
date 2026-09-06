@@ -60,3 +60,20 @@ Phase 1 exposes content detection and settled completion forwarding in one edito
 All Event Automation copy, validation, preview, logs, badges and confirmations comes from the ten existing next-intl locales with equal key sets. Built-in rules have a stable `builtin_key`, a localized name and built-in badge; startup or migration MUST NOT overwrite edits or enabled state. Preview is a no-side-effect “Test rule” result in human language, with technical ids in a collapsed details area. Logs map fired/skipped/failed and guard reasons to human text while retaining prompt snapshot and source/target identity.
 
 When a header has no persisted conversation id, its Event Automation button is disabled with an explanatory tooltip; global creation remains available. Scope and target display title, folder and agent labels; internal ids are stored and shown only in technical details. Current conversation views label global, folder and agent-type rules as inherited and show only rules actually applying to that conversation.
+# Current product contract
+
+The UI presents one Automation Registry projection containing EventRules and
+Wake records. The default view shows all records and orders active/waiting,
+current-conversation applicability, priority, then stable id; applicability is
+shown as a badge rather than implemented by silently filtering rows. Search
+covers name, contains/regex/error kind, prompt, target title, creator, type,
+and Wake description. The shared editor uses product labels (内容检测、一次
+执行结束、等待时间/程序) and keeps technical trigger/action enums in an
+optional details area.
+
+The conversation entry uses the same registry source and defaults newly
+created rules and Wakes to the current persisted conversation. A draft without
+a persisted conversation id disables that entry while the global page remains
+able to create global rules. User and Agent provenance is displayed, Agent
+Wakes can be inspected/cancelled, and fired history is retained rather than
+re-enabled as a new instance.

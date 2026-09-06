@@ -8,17 +8,14 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let db = manager.get_connection();
-        // The emergency compatibility repair may have added either column
-        // before the migration runner reaches this migration. SQLite has no
-        // portable `ADD COLUMN IF NOT EXISTS`, so inspect each name first.
         for (name, kind) in [
             ("creator_kind", "TEXT NOT NULL DEFAULT 'user'"),
-            ("creator_id", "TEXT NULL"),
+            ("creator_conversation_id", "INTEGER NULL"),
         ] {
             let check = Statement::from_string(
                 DbBackend::Sqlite,
                 format!(
-                    "SELECT COUNT(*) AS n FROM pragma_table_info('agent_wake') WHERE name = '{name}'"
+                    "SELECT COUNT(*) AS n FROM pragma_table_info('event_rule') WHERE name = '{name}'"
                 ),
             );
             let exists = db
@@ -31,7 +28,7 @@ impl MigrationTrait for Migration {
             if !exists {
                 db.execute(Statement::from_string(
                     DbBackend::Sqlite,
-                    format!("ALTER TABLE agent_wake ADD COLUMN \"{name}\" {kind}"),
+                    format!("ALTER TABLE event_rule ADD COLUMN \"{name}\" {kind}"),
                 ))
                 .await?;
             }

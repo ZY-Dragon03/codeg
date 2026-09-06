@@ -43,11 +43,11 @@ pub mod supervise;
 mod terminal;
 pub mod turn_timings;
 pub mod update;
+pub mod wake_scheduler;
 pub mod web;
 pub mod work_task;
 pub mod workspace_state;
 pub mod workspace_transfer;
-pub mod wake_scheduler;
 
 /// Sweep stale ACP binary cache trash created by the rename-aside fallback in
 /// `acp::binary_cache::clear_agent_cache`. Safe to call any time; intended to
@@ -64,25 +64,21 @@ mod tauri_app {
     use crate::acp::manager::ConnectionManager;
     use crate::chat_channel::manager::ChatChannelManager;
     use crate::commands::{
-        acp as acp_commands, app_update as app_update_commands,
-        automation as automation_commands, automation_registry as automation_registry_commands,
-        background as background_commands, backup,
-        canvas as canvas_commands,
-        chat_authoring as chat_authoring_commands, chat_channel as chat_channel_commands,
-        conversations,
+        acp as acp_commands, app_update as app_update_commands, automation as automation_commands,
+        automation_registry as automation_registry_commands, background as background_commands,
+        backup, canvas as canvas_commands, chat_authoring as chat_authoring_commands,
+        chat_channel as chat_channel_commands, conversations,
         custom_skills as custom_skills_commands, delegation as delegation_commands,
         event_rule as event_rule_commands, experts as experts_commands,
-        feedback as feedback_commands, file_io, folder_commands,
-        folder_links, office_tools as office_tools_commands, open_in,
-        folders, logging as logging_commands, mcp as mcp_commands,
-        model_provider as model_provider_commands, notification, pet as pet_commands, project_boot,
+        feedback as feedback_commands, file_io, folder_commands, folder_links, folders,
+        forge as forge_commands, logging as logging_commands, mcp as mcp_commands,
+        model_provider as model_provider_commands, notification,
+        office_tools as office_tools_commands, open_in, pet as pet_commands, project_boot,
         question as question_commands, quick_messages as quick_messages_commands,
-        remote_proxy as remote_proxy_commands,
-        remote_workspace as remote_workspace_commands, science as science_commands,
-        session_info as session_info_commands,
-        system_settings, terminal as terminal_commands,
-        token_usage as token_usage_commands, wake as wake_commands,
-        forge as forge_commands, version_control, windows, work_task as work_task_commands,
+        remote_proxy as remote_proxy_commands, remote_workspace as remote_workspace_commands,
+        science as science_commands, session_info as session_info_commands, system_settings,
+        terminal as terminal_commands, token_usage as token_usage_commands, version_control,
+        wake as wake_commands, windows, work_task as work_task_commands,
         workspace_state as workspace_state_commands,
     };
     use crate::terminal::manager::TerminalManager;
@@ -867,6 +863,10 @@ mod tauri_app {
                             tokens: tokens.clone(),
                             parent_lookup,
                             session_info: session_info_lookup,
+                            event_rules_engine: app
+                                .state::<crate::event_rules::EventRulesEngineHandle>()
+                                .inner()
+                                .clone(),
                         },
                     );
                     tauri::async_runtime::spawn(async move {
@@ -923,6 +923,8 @@ mod tauri_app {
                         app.state::<ConnectionManager>().clone_ref(),
                     );
                     app.state::<crate::terminal::manager::TerminalManager>()
+                        .set_wake_scheduler(scheduler.clone());
+                    app.state::<ConnectionManager>()
                         .set_wake_scheduler(scheduler.clone());
                     tauri::async_runtime::spawn(scheduler.run());
                 }
@@ -1581,6 +1583,7 @@ mod tauri_app {
                 wake_commands::wake_list,
                 wake_commands::wake_create,
                 wake_commands::wake_cancel,
+                wake_commands::wake_update,
                 event_rule_commands::event_rule_get,
                 event_rule_commands::event_rule_create,
                 event_rule_commands::event_rule_update,

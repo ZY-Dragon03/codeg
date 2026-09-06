@@ -33,3 +33,13 @@ returns a match; action-target owns target resolution/send receipts.
 9d685f36 实际由 event_rules/engine.rs 订阅 InternalEventBus，缓存 SessionFailure/Error 并在 TurnComplete settle 后产生 turn_failed。当前成功 end_turn 只重置 attempts，没有 turn_completed 规则能力。1A 已勾选任务仅作历史交付记录，不表示本轮实机验证。
 
 Phase 3 由 event-automation-spawn-agent 1.4 扩展 settled-success producer 与唯一 turn correlation，供 reviewer core 和 spawn 共用；不能把 session id 当 turn 唯一 id。Wake 的 terminal/timer producer 独立。chain 完成事件由其关联 handler 消费，不能再次被普通起始规则启动新链。
+# Current lifecycle contract
+
+The canonical lifecycle envelope carries conversation, folder, agent type,
+turn correlation, trigger, merged error fields, stop reason, and a stable
+event/fingerprint identity. Content matches remain provisional until settle;
+the action executor is downstream of the lifecycle matcher. SessionFailure and
+ACP Error merge in either arrival order, with a concrete error kind/title/
+details value never replaced by `unknown`. Stable priority/id ordering and
+dedup are part of the shared contract; exactly-once delivery across a process
+restart remains `UNKNOWN_NOT_PROVEN`.

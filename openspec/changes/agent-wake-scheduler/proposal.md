@@ -33,7 +33,7 @@ P0-4 / 阶段二：长程序运行期间无人值守。Agent 登记「程序结�
 - `codeg-mcp` 新工具（或扩展现有）
 - `event-lifecycle-bus` 发布 `terminal_exited`、`timer_fired`
 
-阶段边界：Phase 2；Phase 1 产品先完成 event-automation-ui。Wake 不阻塞 reviewer-controlled-handoff；后者无需 timer/terminal producer。复用同一 action executor，不能由事件观察和 Wake 消费重复发送。
+阶段边界：Phase 1B；Wake 与 event-automation-ui 通过统一 Registry 一起验收。Wake 不阻塞后续 reviewer-controlled-handoff；后者无需 timer/terminal producer。复用同一 action executor，不能由事件观察和 Wake 消费重复发送。
 
 ## Product model revision (2026-09-06)
 

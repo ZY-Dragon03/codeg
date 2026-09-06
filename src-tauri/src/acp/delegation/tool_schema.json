@@ -463,5 +463,49 @@
         }
       }
     }
+  },
+  {
+    "name": "create_event_automation",
+    "description": "Create an Event Automation owned by this authenticated conversation.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["name", "enabled", "priority", "config"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "enabled": {"type": "boolean"},
+        "priority": {"type": "integer"},
+        "config": {"type": "object", "additionalProperties": true}
+      }
+    }
+  },
+  {
+    "name": "list_event_automations",
+    "description": "List Event Automations owned by this authenticated conversation.",
+    "inputSchema": {"type": "object", "properties": {}}
+  },
+  {
+    "name": "update_event_automation",
+    "description": "Update an owned Event Automation; provide enabled or a complete draft.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {"type": "integer"},
+        "enabled": {"type": "boolean"},
+        "draft": {"type": "object", "additionalProperties": true}
+      }
+    }
+  },
+  {
+    "name": "delete_or_cancel_event_automation",
+    "description": "Delete an owned Event Automation or cancel an owned Wake by id.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {"type": "integer"},
+        "kind": {"type": "string", "enum": ["event_rule", "wake"]}
+      }
+    }
   }
 ]

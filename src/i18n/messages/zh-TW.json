@@ -5589,7 +5589,7 @@
   },
   "EventAutomations": {
     "scheduled": "排程自動化",
-    "registryTitle": "自動化註冊表", "registryDescription": "在同一處管理事件規則與 Wake 觸發器。", "registrySearchPlaceholder": "搜尋名稱、關鍵字、正規表示式、提示、目標、建立者、類型或 Wake 描述", "registryEmpty": "尚無自動化。", "registryUserCreated": "使用者建立", "newWake": "新增 Wake", "wake": "Wake", "sortActive": "啟用優先", "sortApplicable": "適用優先", "sortPriority": "優先順序", "sortId": "最新 ID", "priority": "優先順序", "wakeEditorTitle": "建立 Wake", "wakeNamePlaceholder": "Wake 名稱", "wakeAfter": "延遲後", "wakeAt": "指定時間", "wakeProcessExit": "程序結束時", "wakeValuePlaceholder": "秒數、時間或程序 ID", "wakeTargetPlaceholder": "目標對話（選填）", "wakePromptPlaceholder": "Wake 觸發時傳送的訊息",
+    "registryTitle": "自動化註冊表", "registryDescription": "在同一處管理事件規則與 Wake 觸發器。", "registrySearchPlaceholder": "搜尋名稱、關鍵字、正規表示式、提示、目標、建立者、類型或 Wake 描述", "registryEmpty": "尚無自動化。", "registryUserCreated": "使用者建立", "registryAddCustom": "新增自訂", "newWake": "新增 Wake", "wake": "Wake", "sortActive": "啟用優先", "sortApplicable": "適用優先", "sortPriority": "優先順序", "sortId": "最新 ID", "priority": "優先順序", "wakeEditorTitle": "建立 Wake", "wakeNamePlaceholder": "Wake 名稱", "wakeAfter": "延遲後", "wakeAt": "指定時間", "wakeProcessExit": "程序結束時", "wakeValuePlaceholder": "秒數、時間或程序 ID", "wakeTargetPlaceholder": "目標對話（選填）", "wakePromptPlaceholder": "Wake 觸發時傳送的訊息",
     "event": "事件自動化",
     "tabsLabel": "自動化類型",
     "title": "事件自動化",

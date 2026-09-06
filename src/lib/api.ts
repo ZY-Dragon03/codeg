@@ -3503,17 +3503,100 @@ export async function automationRegistryList(): Promise<AutomationRegistryItem[]
   }
 }
 
-export async function wakeList(): Promise<WakeRecord[]> {
-  return getTransport().call("wake_list")
+type WakeBackendDraft = {
+  sourceConversationId: number
+  sourceConnectionId: string | null
+  terminalId: string | null
+  processRef: string | null
+  triggerKind: "timer_after" | "timer_at" | "process_exit"
+  fireAt: string | null
+  prompt: string
+  creatorKind: "user"
+  creatorId: string | null
 }
-export async function wakeCreate(draft: WakeDraft): Promise<WakeRecord> {
-  return getTransport().call("wake_create", { draft })
+
+function toWakeBackendDraft(
+  draft: WakeDraft,
+  sourceConversationId?: number | null
+): WakeBackendDraft {
+  const source = draft.target_conversation_id ?? sourceConversationId
+  if (!source || source <= 0) {
+    throw new Error("A target conversation is required for a wake")
+  }
+  const schedule = draft.schedule
+  if (schedule.kind === "after") {
+    return {
+      sourceConversationId: source,
+      sourceConnectionId: null,
+      terminalId: null,
+      processRef: null,
+      triggerKind: "timer_after",
+      fireAt: new Date(Date.now() + Math.max(1, schedule.delay_ms)).toISOString(),
+      prompt: draft.prompt?.trim() ?? "",
+      creatorKind: "user",
+      creatorId: null,
+    }
+  }
+  if (schedule.kind === "at") {
+    return {
+      sourceConversationId: source,
+      sourceConnectionId: null,
+      terminalId: null,
+      processRef: null,
+      triggerKind: "timer_at",
+      fireAt: new Date(schedule.at).toISOString(),
+      prompt: draft.prompt?.trim() ?? "",
+      creatorKind: "user",
+      creatorId: null,
+    }
+  }
+  return {
+    sourceConversationId: source,
+    sourceConnectionId: null,
+    terminalId: schedule.process_id == null ? null : String(schedule.process_id),
+    processRef: schedule.process_id == null ? null : String(schedule.process_id),
+    triggerKind: "process_exit",
+    fireAt: null,
+    prompt: draft.prompt?.trim() ?? "",
+    creatorKind: "user",
+    creatorId: null,
+  }
 }
-export async function wakeUpdate(id: number, draft: WakeDraft): Promise<WakeRecord> {
-  return getTransport().call("wake_update", { id, draft })
+
+export async function wakeList(
+  sourceConversationId?: number | null
+): Promise<WakeRecord[]> {
+  return getTransport().call("wake_list", {
+    sourceConversationId: sourceConversationId ?? 0,
+  })
 }
-export async function wakeCancel(id: number): Promise<void> {
-  return getTransport().call("wake_cancel", { id })
+export async function wakeCreate(
+  draft: WakeDraft,
+  sourceConversationId?: number | null
+): Promise<WakeRecord> {
+  return getTransport().call("wake_create", {
+    draft: toWakeBackendDraft(draft, sourceConversationId),
+  })
+}
+export async function wakeUpdate(
+  id: number,
+  draft: WakeDraft,
+  sourceConversationId?: number | null
+): Promise<WakeRecord> {
+  return getTransport().call("wake_update", {
+    id,
+    sourceConversationId: draft.target_conversation_id ?? sourceConversationId,
+    draft: toWakeBackendDraft(draft, sourceConversationId),
+  })
+}
+export async function wakeCancel(
+  id: number,
+  sourceConversationId?: number | null
+): Promise<void> {
+  return getTransport().call("wake_cancel", {
+    id,
+    sourceConversationId: sourceConversationId ?? 0,
+  })
 }
 
 // Work tasks

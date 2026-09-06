@@ -107,3 +107,18 @@ Existing target offline 时只允许按原 external_id/agent_type/folder 恢复�
 Phase 1 does not expose reviewer chain fields in EventRuleEditor. Completion forwarding to an existing conversation is the available primitive; reviewer decisions remain a later consumer of the same send/read executor.
 
 The allowed-target policy is snapshotted at chain creation as explicit conversation ids and/or an opted-in folder scope plus the source/current worker allowance. Every dispatch revalidates the target identity and policy; policy narrowing, deletion or out-of-scope targets STOP without fallback or spawn. `max_iterations` starts at completed=0 and increments exactly once for each unique reviewer turn that settles successfully, including a settled turn with a missing decision (which then STOPs). ACP error/cancel and duplicate completion do not increment it. Before every automatic dispatch, `next_depth = depth + 1` MUST satisfy `next_depth <= max_chain_depth`. Hard guards save requested/effective decision and override reason.
+# Light-loop boundary and policy contract
+
+The current product uses a light A→B→A loop: a settled completion rule sends
+the source task, recent valid user message, and current final report to the
+reviewer; the reviewer may use authorized read/send tools to request a follow-
+up. Heavy `automation_decision` orchestration is future work. Reviewer target
+policy is a frozen explicit conversation allowlist or opted-in folder scope,
+plus the source/current conversation. Each dispatch revalidates that snapshot
+against the target row and stops on policy narrowing, deletion, or mismatch.
+
+`max_iterations` counts settled successful reviewer turns once. A missing or
+invalid decision increments that settled count and then STOPs; ACP failure,
+cancel, and duplicate completion do not increment. A hard guard may override
+CONTINUE, but logs both requested and effective decisions and the override
+reason.

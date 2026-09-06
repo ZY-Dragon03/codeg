@@ -61,6 +61,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::acp::chat_authoring::{NewAutomationSpec, NewWorkTaskSpec};
 use crate::acp::question::QuestionSpec;
+use crate::models::EventRuleDraft;
 
 /// One delegation call's worth of input forwarded from the companion to the
 /// main process. The main process re-validates `token` and maps
@@ -285,6 +286,35 @@ pub struct BrokerCancelWakeRequest {
     pub wake_id: i32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerCreateEventAutomationRequest {
+    pub token: String,
+    pub draft: EventRuleDraft,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerListEventAutomationsRequest {
+    pub token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerUpdateEventAutomationRequest {
+    pub token: String,
+    pub id: i32,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub draft: Option<EventRuleDraft>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerDeleteOrCancelEventAutomationRequest {
+    pub token: String,
+    pub id: i32,
+    #[serde(default)]
+    pub kind: Option<String>,
+}
+
 /// Tagged top-level message dispatched by the listener. Adding new variants
 /// is the wire-stable way to grow the broker protocol without touching the
 /// frame layer.
@@ -309,6 +339,10 @@ pub enum BrokerMessage {
     Wake(BrokerWakeRequest),
     ListWakes(BrokerListWakesRequest),
     CancelWake(BrokerCancelWakeRequest),
+    CreateEventAutomation(BrokerCreateEventAutomationRequest),
+    ListEventAutomations(BrokerListEventAutomationsRequest),
+    UpdateEventAutomation(BrokerUpdateEventAutomationRequest),
+    DeleteOrCancelEventAutomation(BrokerDeleteOrCancelEventAutomationRequest),
 }
 
 /// The wrapped outcome the main process returns over the same socket.
@@ -512,7 +546,11 @@ pub async fn client_read_conversation_context_round_trip(
     socket_path: &str,
     req: &BrokerReadConversationContextRequest,
 ) -> io::Result<BrokerResponse> {
-    message_round_trip(socket_path, &BrokerMessage::ReadConversationContext(req.clone())).await
+    message_round_trip(
+        socket_path,
+        &BrokerMessage::ReadConversationContext(req.clone()),
+    )
+    .await
 }
 
 pub async fn client_wake_round_trip(
@@ -534,6 +572,50 @@ pub async fn client_cancel_wake_round_trip(
     req: &BrokerCancelWakeRequest,
 ) -> io::Result<BrokerResponse> {
     message_round_trip(socket_path, &BrokerMessage::CancelWake(req.clone())).await
+}
+
+pub async fn client_create_event_automation_round_trip(
+    socket_path: &str,
+    req: &BrokerCreateEventAutomationRequest,
+) -> io::Result<BrokerResponse> {
+    message_round_trip(
+        socket_path,
+        &BrokerMessage::CreateEventAutomation(req.clone()),
+    )
+    .await
+}
+
+pub async fn client_list_event_automations_round_trip(
+    socket_path: &str,
+    req: &BrokerListEventAutomationsRequest,
+) -> io::Result<BrokerResponse> {
+    message_round_trip(
+        socket_path,
+        &BrokerMessage::ListEventAutomations(req.clone()),
+    )
+    .await
+}
+
+pub async fn client_update_event_automation_round_trip(
+    socket_path: &str,
+    req: &BrokerUpdateEventAutomationRequest,
+) -> io::Result<BrokerResponse> {
+    message_round_trip(
+        socket_path,
+        &BrokerMessage::UpdateEventAutomation(req.clone()),
+    )
+    .await
+}
+
+pub async fn client_delete_or_cancel_event_automation_round_trip(
+    socket_path: &str,
+    req: &BrokerDeleteOrCancelEventAutomationRequest,
+) -> io::Result<BrokerResponse> {
+    message_round_trip(
+        socket_path,
+        &BrokerMessage::DeleteOrCancelEventAutomation(req.clone()),
+    )
+    .await
 }
 
 /// Total budget for `open()` retries on Windows named pipes. Has to be

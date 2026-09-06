@@ -103,7 +103,6 @@ import {
 import { onTransportReconnect, subscribe } from "@/lib/platform"
 import { cn } from "@/lib/utils"
 import type { Automation, AutomationDraft, AutomationRun } from "@/lib/types"
-import { EventAutomationsPanel } from "./event-automations-panel"
 import { AutomationRegistryPanel } from "./automation-registry-panel"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
