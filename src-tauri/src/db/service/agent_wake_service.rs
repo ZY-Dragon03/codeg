@@ -25,6 +25,8 @@ pub struct CreateWake {
     pub trigger_kind: String,
     pub fire_at: Option<DateTime<Utc>>,
     pub prompt: String,
+    pub creator_kind: String,
+    pub creator_id: Option<String>,
 }
 
 pub async fn create(
@@ -47,6 +49,8 @@ pub async fn create(
     let now = Utc::now();
     let model = agent_wake::ActiveModel {
         source_conversation_id: Set(input.source_conversation_id),
+        creator_kind: Set(normalize_creator_kind(&input.creator_kind)?),
+        creator_id: Set(input.creator_id),
         source_connection_id: Set(input.source_connection_id),
         terminal_id: Set(input.terminal_id),
         process_ref: Set(input.process_ref),
@@ -64,6 +68,14 @@ pub async fn create(
     .insert(db)
     .await?;
     Ok(model)
+}
+
+fn normalize_creator_kind(value: &str) -> Result<String, DbError> {
+    let value = value.trim().to_ascii_lowercase();
+    match value.as_str() {
+        "user" | "agent" => Ok(value),
+        _ => Err(DbError::Validation("creator_kind must be user or agent".into())),
+    }
 }
 
 pub async fn list_for_source(
@@ -215,4 +227,33 @@ pub async fn recover_stale_dispatching(
         recovered += 1;
     }
     Ok(recovered)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::test_helpers::{fresh_in_memory_db, seed_conversation, seed_folder};
+    use crate::models::agent::AgentType;
+
+    #[tokio::test]
+    async fn cancel_is_source_scoped_and_terminal() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/wake-state").await;
+        let source = seed_conversation(&db, folder, AgentType::Cursor).await;
+        let row = create(&db.conn, CreateWake {
+            source_conversation_id: source,
+            source_connection_id: None,
+            terminal_id: None,
+            process_ref: None,
+            trigger_kind: TRIGGER_AT.into(),
+            fire_at: Some(Utc::now() + chrono::Duration::hours(1)),
+            prompt: "later".into(),
+            creator_kind: "user".into(),
+            creator_id: None,
+        }).await.unwrap();
+        let cancelled = cancel(&db.conn, source, row.id).await.unwrap();
+        assert_eq!(cancelled.status, STATUS_FAILED);
+        assert_eq!(cancelled.error.as_deref(), Some("cancelled"));
+        assert!(claim_due(&db.conn, Utc::now() + chrono::Duration::days(1), 10).await.unwrap().is_empty());
+    }
 }

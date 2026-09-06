@@ -2,6 +2,7 @@ pub mod acp;
 #[cfg(feature = "tauri-runtime")]
 pub mod app_update;
 pub mod automation;
+pub mod automation_registry;
 pub mod background;
 pub mod backup;
 pub mod canvas;
@@ -42,6 +43,7 @@ pub mod terminal;
 pub mod token_usage;
 pub mod turn_window;
 pub mod version_control;
+pub mod wake;
 #[cfg(feature = "tauri-runtime")]
 pub mod windows;
 pub mod work_task;

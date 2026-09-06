@@ -7,6 +7,8 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
     pub source_conversation_id: i32,
+    pub creator_kind: String,
+    pub creator_id: Option<String>,
     pub source_connection_id: Option<String>,
     pub terminal_id: Option<String>,
     pub process_ref: Option<String>,

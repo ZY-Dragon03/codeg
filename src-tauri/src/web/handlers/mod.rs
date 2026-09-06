@@ -1,6 +1,7 @@
 pub mod acp;
 pub mod app_update;
 pub mod automation;
+pub mod automation_registry;
 pub mod canvas;
 pub mod background;
 pub mod backup;
@@ -40,3 +41,4 @@ pub mod web_server;
 pub mod work_task;
 pub mod workspace_files;
 pub mod workspace_state;
+pub mod wake;

@@ -1333,6 +1333,10 @@ pub fn build_router(
             "/automation_cancel_run",
             post(handlers::automation::automation_cancel_run),
         )
+        .route("/automation_registry_list", post(handlers::automation_registry::automation_registry_list))
+        .route("/wake_list", post(handlers::wake::wake_list))
+        .route("/wake_create", post(handlers::wake::wake_create))
+        .route("/wake_cancel", post(handlers::wake::wake_cancel))
         // Event automations
         .route("/event_rule_list", post(handlers::event_rule::event_rule_list))
         .route("/event_rule_get", post(handlers::event_rule::event_rule_get))

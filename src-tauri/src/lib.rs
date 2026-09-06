@@ -65,7 +65,8 @@ mod tauri_app {
     use crate::chat_channel::manager::ChatChannelManager;
     use crate::commands::{
         acp as acp_commands, app_update as app_update_commands,
-        automation as automation_commands, background as background_commands, backup,
+        automation as automation_commands, automation_registry as automation_registry_commands,
+        background as background_commands, backup,
         canvas as canvas_commands,
         chat_authoring as chat_authoring_commands, chat_channel as chat_channel_commands,
         conversations,
@@ -80,7 +81,7 @@ mod tauri_app {
         remote_workspace as remote_workspace_commands, science as science_commands,
         session_info as session_info_commands,
         system_settings, terminal as terminal_commands,
-        token_usage as token_usage_commands,
+        token_usage as token_usage_commands, wake as wake_commands,
         forge as forge_commands, version_control, windows, work_task as work_task_commands,
         workspace_state as workspace_state_commands,
     };
@@ -1576,6 +1577,10 @@ mod tauri_app {
                 automation_commands::automation_run_now,
                 automation_commands::automation_cancel_run,
                 event_rule_commands::event_rule_list,
+                automation_registry_commands::automation_registry_list,
+                wake_commands::wake_list,
+                wake_commands::wake_create,
+                wake_commands::wake_cancel,
                 event_rule_commands::event_rule_get,
                 event_rule_commands::event_rule_create,
                 event_rule_commands::event_rule_update,

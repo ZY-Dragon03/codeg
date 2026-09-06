@@ -243,21 +243,29 @@ impl EventAutomationAccess for ConnectionEventAutomationAccess {
                 (Some(at), None)
             }
             TRIGGER_PROCESS_EXIT => {
-                let Some(terminal_id) = req.terminal_id.filter(|value| !value.trim().is_empty()) else {
-                    return Self::error_response("wake_on_process_exit requires terminal_id").await;
-                };
-                (None, Some(terminal_id))
+                // TokenEntry currently binds only the parent connection, while
+                // terminal ids are minted/tracked by the terminal manager and
+                // are not exposed through a conversation-scoped authorization
+                // lookup. Accepting a caller supplied id would allow waking on
+                // another session's process. Fail closed until that identity
+                // binding exists.
+                return Self::error_response(
+                    "wake_on_process_exit is unavailable until terminal identity is verified",
+                )
+                .await;
             }
             _ => return Self::error_response("unknown wake trigger").await,
         };
         let input = CreateWake {
             source_conversation_id: source_id,
-            source_connection_id: Some(entry.parent_connection_id),
+            source_connection_id: Some(entry.parent_connection_id.clone()),
             terminal_id,
             process_ref: req.process_ref,
             trigger_kind: req.trigger_kind,
             fire_at,
             prompt: req.prompt,
+            creator_kind: "agent".into(),
+            creator_id: Some(entry.parent_connection_id.clone()),
         };
         match agent_wake_service::create(&self.db.conn, input).await {
             Ok(row) => serde_json::json!({"ok": true, "wake": row}),

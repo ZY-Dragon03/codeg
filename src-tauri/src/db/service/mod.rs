@@ -1,5 +1,6 @@
 pub mod agent_setting_service;
 pub mod agent_wake_service;
+pub mod automation_registry;
 pub mod app_metadata_service;
 pub mod automation_service;
 pub mod canvas_service;

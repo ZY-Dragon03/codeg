@@ -47,6 +47,7 @@ mod m20260831_000001_canvas_node_group_grid;
 mod m20260904_000001_event_rules;
 mod m20260905_000001_event_rule_log_structured;
 mod m20260906_000001_agent_wakes;
+mod m20260906_000002_automation_provenance;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -100,6 +101,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260904_000001_event_rules::Migration),
             Box::new(m20260905_000001_event_rule_log_structured::Migration),
             Box::new(m20260906_000001_agent_wakes::Migration),
+            Box::new(m20260906_000002_automation_provenance::Migration),
         ]
     }
 }
