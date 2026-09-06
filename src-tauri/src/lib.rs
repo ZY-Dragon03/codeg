@@ -860,6 +860,7 @@ mod tauri_app {
                                 conn: db_conn.clone(),
                             },
                             manager: cm_state.clone_ref(),
+                            data_dir: effective_data_dir.clone(),
                             tokens: tokens.clone(),
                             parent_lookup,
                             session_info: session_info_lookup,
@@ -903,12 +904,13 @@ mod tauri_app {
                     let db = db::AppDatabase {
                         conn: app.state::<db::AppDatabase>().conn.clone(),
                     };
-                    let engine = std::sync::Arc::new(crate::event_rules::EventRulesEngine::new(
+                    let engine = std::sync::Arc::new(crate::event_rules::EventRulesEngine::with_data_dir(
                         db,
                         app.state::<ConnectionManager>().clone_ref(),
                         app.state::<std::sync::Arc<crate::acp::InternalEventBus>>()
                             .inner()
                             .clone(),
+                        effective_data_dir.clone(),
                     ));
                     app.state::<crate::event_rules::EventRulesEngineHandle>()
                         .set(engine.clone());
@@ -921,6 +923,9 @@ mod tauri_app {
                             conn: app.state::<db::AppDatabase>().conn.clone(),
                         },
                         app.state::<ConnectionManager>().clone_ref(),
+                        effective_data_dir.clone(),
+                        crate::web::event_bridge::EventEmitter::Tauri(app.handle().clone()),
+                        "main".to_owned(),
                     );
                     app.state::<crate::terminal::manager::TerminalManager>()
                         .set_wake_scheduler(scheduler.clone());

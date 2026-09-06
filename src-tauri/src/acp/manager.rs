@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, DatabaseConnection, EntityTrait,
-    TransactionTrait,
+    ColumnTrait, QueryFilter, TransactionTrait,
 };
 
 use crate::acp::connection::{
@@ -32,6 +32,7 @@ use crate::acp::types::{
     ForkResultInfo, PromptCapabilitiesInfo, PromptInputBlock,
 };
 use crate::db::entities::conversation::{self, ConversationKind, ConversationStatus};
+use crate::db::entities::folder;
 use crate::db::service::conversation_service;
 use crate::db::AppDatabase;
 use crate::models::agent::AgentType;
@@ -3317,6 +3318,125 @@ impl ConnectionManager {
         }
         eligible.sort();
         eligible.into_iter().next()
+    }
+
+    /// Resolve an existing persisted conversation to a connection that can
+    /// accept an automatic follow-up.  If the conversation is currently
+    /// disconnected, resume the exact native ACP session recorded in its
+    /// row.  This deliberately does not create a row or a fresh session: the
+    /// caller must supply the existing conversation id and the row must carry
+    /// a resumable `external_id`.
+    pub async fn ensure_existing_conversation_ready(
+        &self,
+        db: &AppDatabase,
+        data_dir: &std::path::Path,
+        conversation_id: i32,
+        owner_window_label: String,
+        emitter: EventEmitter,
+    ) -> Result<String, String> {
+        if let Some(connection_id) = self
+            .find_eligible_connection_by_conversation_id(conversation_id)
+            .await
+        {
+            return Ok(connection_id);
+        }
+
+        let conversation = conversation::Entity::find_by_id(conversation_id)
+            .filter(conversation::Column::DeletedAt.is_null())
+            .one(&db.conn)
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("conversation {conversation_id} not found"))?;
+        let external_id = conversation.external_id.clone().ok_or_else(|| {
+            format!(
+                "conversation {conversation_id} has no resumable native session identity"
+            )
+        })?;
+        let agent_type = AgentType::from_wire(&conversation.agent_type).ok_or_else(|| {
+            format!(
+                "conversation {conversation_id} has unknown agent type {}",
+                conversation.agent_type
+            )
+        })?;
+        let folder = folder::Entity::find_by_id(conversation.folder_id)
+            .one(&db.conn)
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| {
+                format!(
+                    "conversation {conversation_id} folder {} not found",
+                    conversation.folder_id
+                )
+            })?;
+        let working_dir = conversation
+            .origin_cwd
+            .clone()
+            .unwrap_or(folder.path);
+
+        // The native session/load path owns the session's model/config state.
+        // Do not invent a mode or config override when reconnecting a row that
+        // was created by the user; the persisted external_id is the identity
+        // that binds this process back to that session.
+        let runtime_env = crate::commands::acp::build_session_runtime_env(
+            db,
+            agent_type,
+            Some(external_id.as_str()),
+            data_dir,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        let connection_id = self
+            .spawn_agent(
+                agent_type,
+                Some(working_dir.clone()),
+                Some(external_id.clone()),
+                runtime_env,
+                owner_window_label,
+                emitter,
+                None,
+                BTreeMap::new(),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+
+        // `spawn_agent` waits for SessionStarted when resuming, so checking the
+        // returned connection is enough to reject a process that exited during
+        // handshake.  A fresh connection is never accepted merely because it
+        // has the right agent type: both the native session id and cwd must
+        // match the persisted row.
+        let connections = self.connections.lock().await;
+        let Some(connection) = connections.get(&connection_id) else {
+            return Err(format!(
+                "resumed connection for conversation {conversation_id} disappeared"
+            ));
+        };
+        let state = connection.state.read().await;
+        if connection.agent_type != agent_type
+            || state.external_id.as_deref() != Some(external_id.as_str())
+            || state.working_dir.as_deref().map(std::path::Path::to_string_lossy)
+                != Some(std::borrow::Cow::Owned(working_dir.clone()))
+            || state.status != ConnectionStatus::Connected
+            || state.turn_in_flight
+            || state.pending_permission.is_some()
+            || state.has_active_background_work(chrono::Utc::now())
+        {
+            return Err(format!(
+                "conversation {conversation_id} resumed session is not connected and idle"
+            ));
+        }
+        Ok(connection_id)
+    }
+
+    /// Snapshot the emitter and owner label for a live connection so a
+    /// follow-up can resume another conversation without routing events to an
+    /// arbitrary connection or window.
+    pub async fn runtime_context_for_connection(
+        &self,
+        connection_id: &str,
+    ) -> Option<(EventEmitter, String)> {
+        let connections = self.connections.lock().await;
+        let connection = connections.get(connection_id)?;
+        Some((connection.emitter.clone(), connection.owner_window_label.clone()))
     }
 
     /// The in-flight user prompt for `conversation_id` and the instant its turn

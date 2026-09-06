@@ -2,6 +2,7 @@
 //! conversation through the same ACP follow-up path as Event Rules.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,19 +11,32 @@ use crate::acp::types::PromptInputBlock;
 use crate::db::service::agent_wake_service as wakes;
 use crate::db::AppDatabase;
 use crate::db::entities::conversation;
+use crate::web::event_bridge::EventEmitter;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 pub struct WakeScheduler {
     db: AppDatabase,
     manager: ConnectionManager,
+    data_dir: PathBuf,
+    emitter: EventEmitter,
+    owner_window_label: String,
     terminal_owners: Arc<std::sync::RwLock<HashMap<String, String>>>,
 }
 
 impl WakeScheduler {
-    pub fn new(db: AppDatabase, manager: ConnectionManager) -> Arc<Self> {
+    pub fn new(
+        db: AppDatabase,
+        manager: ConnectionManager,
+        data_dir: PathBuf,
+        emitter: EventEmitter,
+        owner_window_label: String,
+    ) -> Arc<Self> {
         Arc::new(Self {
             db,
             manager,
+            data_dir,
+            emitter,
+            owner_window_label,
             terminal_owners: Arc::new(std::sync::RwLock::new(HashMap::new())),
         })
     }
@@ -138,18 +152,37 @@ impl WakeScheduler {
             .await;
             return;
         };
-        let Some(connection_id) = self
+        let (emitter, owner_window_label) = if let Some(source_connection_id) =
+            wake.source_connection_id.as_deref()
+        {
+            self.manager
+                .runtime_context_for_connection(source_connection_id)
+                .await
+                .unwrap_or_else(|| (self.emitter.clone(), self.owner_window_label.clone()))
+        } else {
+            (self.emitter.clone(), self.owner_window_label.clone())
+        };
+        let connection_id = match self
             .manager
-            .find_eligible_connection_by_conversation_id(wake.source_conversation_id)
-            .await
-        else {
-            let _ = wakes::mark_failed(
-                &self.db.conn,
-                wake.id,
-                "target_unavailable: no connected idle conversation".into(),
+            .ensure_existing_conversation_ready(
+                &self.db,
+                &self.data_dir,
+                wake.source_conversation_id,
+                owner_window_label,
+                emitter,
             )
-            .await;
-            return;
+            .await
+        {
+            Ok(connection_id) => connection_id,
+            Err(error) => {
+                let _ = wakes::mark_failed(
+                    &self.db.conn,
+                    wake.id,
+                    format!("target_unavailable: {error}"),
+                )
+                .await;
+                return;
+            }
         };
         let result = self
             .manager

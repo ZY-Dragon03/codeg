@@ -98,6 +98,7 @@ pub trait EventAutomationAccess: Send + Sync {
 pub struct ConnectionEventAutomationAccess {
     pub db: AppDatabase,
     pub manager: ConnectionManager,
+    pub data_dir: PathBuf,
     pub tokens: Arc<TokenRegistry>,
     pub parent_lookup: Arc<dyn ParentSessionLookup>,
     pub session_info: Arc<dyn SessionInfoAccess>,
@@ -119,9 +120,13 @@ impl ConnectionEventAutomationAccess {
         Ok((entry, conversation_id))
     }
 
-    async fn target_allowed(&self, source_id: i32, target_id: i32) -> Result<bool, String> {
+    async fn target_authorization(
+        &self,
+        source_id: i32,
+        target_id: i32,
+    ) -> Result<Option<(i32, i32, i32)>, String> {
         if source_id == target_id {
-            return Ok(true);
+            return Ok(None);
         }
         let source = conversation::Entity::find_by_id(source_id)
             .filter(conversation::Column::DeletedAt.is_null())
@@ -151,15 +156,11 @@ impl ConnectionEventAutomationAccess {
                 RuleScope::AgentType { agent_type } => agent_type == &source.agent_type,
             };
             // A rule is an explicit capability envelope. The normal direction
-            // authorizes source -> target; the reverse check lets a completion
-            // reviewer send a follow-up back to its worker when the worker's
-            // rule explicitly selected the reviewer as a target.
-            let reverse_scope_matches = match &config.scope {
-                RuleScope::Global => true,
-                RuleScope::Conversation { conversation_id } => *conversation_id == target_id,
-                RuleScope::Folder { folder_id } => *folder_id == target.folder_id,
-                RuleScope::AgentType { agent_type } => agent_type == &target.agent_type,
-            };
+            // authorizes source -> target. The inbound direction is the
+            // capability granted by an A -> B automation: while B is the
+            // caller, it may read/send to A. Both directions stay tied to the
+            // enabled row, so disabling or deleting the rule revokes new
+            // invocations immediately.
             let explicit_target = config.action.target_conversation_ids.contains(&target_id)
                 || (matches!(
                     config.action.conversation_ref,
@@ -170,12 +171,42 @@ impl ConnectionEventAutomationAccess {
                     config.action.conversation_ref,
                     ConversationRef::SpecificConversation
                 ) && config.action.conversation_id == Some(source_id));
-            if (!scope_matches || !explicit_target) && (!reverse_scope_matches || !reverse_target) {
-                continue;
+            if scope_matches && explicit_target {
+                tracing::info!(
+                    rule_id = row.id,
+                    source_conversation_id = source_id,
+                    receiver_conversation_id = target_id,
+                    "event automation target authorized"
+                );
+                return Ok(Some((row.id, source_id, target_id)));
             }
-            return Ok(true);
+            // For a caller B requesting A, match the enabled automation whose
+            // source scope is A and whose explicit receiver is B.
+            let inbound_scope_matches = match &config.scope {
+                RuleScope::Global => true,
+                RuleScope::Conversation { conversation_id } => *conversation_id == target_id,
+                RuleScope::Folder { folder_id } => *folder_id == target.folder_id,
+                RuleScope::AgentType { agent_type } => agent_type == &target.agent_type,
+            };
+            if inbound_scope_matches && reverse_target {
+                tracing::info!(
+                    rule_id = row.id,
+                    source_conversation_id = target_id,
+                    receiver_conversation_id = source_id,
+                    "event automation inbound target authorized"
+                );
+                return Ok(Some((row.id, target_id, source_id)));
+            }
         }
-        Ok(false)
+        Ok(None)
+    }
+
+    async fn target_allowed(&self, source_id: i32, target_id: i32) -> Result<bool, String> {
+        Ok(self
+            .target_authorization(source_id, target_id)
+            .await?
+            .is_some()
+            || source_id == target_id)
     }
 
     async fn error_response(error: impl Into<String>) -> Value {
@@ -205,21 +236,25 @@ impl ConnectionEventAutomationAccess {
 #[async_trait]
 impl EventAutomationAccess for ConnectionEventAutomationAccess {
     async fn send_to_conversation(&self, req: BrokerSendToConversationRequest) -> Value {
-        let (_entry, source_id) = match self.source(&req.token).await {
+        let (entry, source_id) = match self.source(&req.token).await {
             Ok(value) => value,
             Err(error) => return Self::error_response(error).await,
         };
         if req.prompt.trim().is_empty() || req.conversation_id <= 0 {
             return Self::error_response("conversation_id and prompt are required").await;
         }
-        match self.target_allowed(source_id, req.conversation_id).await {
-            Ok(true) => {}
-            Ok(false) => {
+        let authorization = match self
+            .target_authorization(source_id, req.conversation_id)
+            .await
+        {
+            Ok(Some(value)) => Some(value),
+            Ok(None) if source_id == req.conversation_id => None,
+            Ok(None) => {
                 return Self::error_response("target is not authorized by an enabled event rule")
                     .await
             }
             Err(error) => return Self::error_response(error).await,
-        }
+        };
         let target = match conversation::Entity::find_by_id(req.conversation_id)
             .filter(conversation::Column::DeletedAt.is_null())
             .one(&self.db.conn)
@@ -229,17 +264,38 @@ impl EventAutomationAccess for ConnectionEventAutomationAccess {
             Ok(None) => return Self::error_response("target conversation not found").await,
             Err(error) => return Self::error_response(error.to_string()).await,
         };
-        let Some(connection_id) = self
+        let Some((emitter, owner_window_label)) = self
             .manager
-            .find_eligible_connection_by_conversation_id(target.id)
+            .runtime_context_for_connection(&entry.parent_connection_id)
             .await
         else {
             return serde_json::json!({
                 "ok": false,
-                "error": "target exists but no connected idle matching session is available",
                 "target_exists": true,
                 "runtime_available": false,
+                "error": "source connection is no longer live",
             });
+        };
+        let connection_id = match self
+            .manager
+            .ensure_existing_conversation_ready(
+                &self.db,
+                &self.data_dir,
+                target.id,
+                owner_window_label,
+                emitter,
+            )
+            .await
+        {
+            Ok(id) => id,
+            Err(error) => {
+                return serde_json::json!({
+                    "ok": false,
+                    "target_exists": true,
+                    "runtime_available": false,
+                    "error": error,
+                })
+            }
         };
         let result = self
             .manager
@@ -255,17 +311,26 @@ impl EventAutomationAccess for ConnectionEventAutomationAccess {
                 None,
             )
             .await;
+        let authorization_json = authorization.map(|(rule_id, source, receiver)| {
+            serde_json::json!({
+                "rule_id": rule_id,
+                "source_conversation_id": source,
+                "receiver_conversation_id": receiver,
+            })
+        });
         match result {
             Ok(message_id) => serde_json::json!({
                 "ok": true,
                 "target_id": target.id,
                 "connection_id": connection_id,
                 "message_id": message_id,
+                "authorization": authorization_json,
             }),
             Err(error) => serde_json::json!({
                 "ok": false,
                 "target_exists": true,
                 "runtime_available": true,
+                "authorization": authorization_json,
                 "error": error.to_string(),
             }),
         }
@@ -276,19 +341,35 @@ impl EventAutomationAccess for ConnectionEventAutomationAccess {
             Ok(value) => value,
             Err(error) => return Self::error_response(error).await,
         };
-        match self.target_allowed(source_id, req.conversation_id).await {
-            Ok(true) => {}
-            Ok(false) => {
+        let authorization = match self
+            .target_authorization(source_id, req.conversation_id)
+            .await
+        {
+            Ok(Some(value)) => Some(value),
+            Ok(None) if source_id == req.conversation_id => None,
+            Ok(None) => {
                 return Self::error_response("target is not authorized by an enabled event rule")
                     .await
             }
             Err(error) => return Self::error_response(error).await,
-        }
+        };
         let info = self
             .session_info
             .resolve(req.conversation_id, req.max_messages.unwrap_or(20).min(200))
             .await;
-        serde_json::json!({"ok": info.found, "target_exists": info.found, "session": info})
+        let authorization_json = authorization.map(|(rule_id, source, receiver)| {
+            serde_json::json!({
+                "rule_id": rule_id,
+                "source_conversation_id": source,
+                "receiver_conversation_id": receiver,
+            })
+        });
+        serde_json::json!({
+            "ok": info.found,
+            "target_exists": info.found,
+            "session": info,
+            "authorization": authorization_json,
+        })
     }
 
     async fn wake(&self, req: BrokerWakeRequest) -> Value {

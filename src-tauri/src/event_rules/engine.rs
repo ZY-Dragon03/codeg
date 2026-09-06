@@ -1,6 +1,7 @@
 //! Event rules engine: subscribe to ACP bus, match rules, send follow-up prompts.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use regex::Regex;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -75,6 +76,7 @@ pub struct EventRulesEngine {
     db: AppDatabase,
     manager: ConnectionManager,
     bus: Arc<InternalEventBus>,
+    data_dir: PathBuf,
     rules: Mutex<Vec<ParsedEventRule>>,
     recent_dedup: Mutex<HashMap<String, Instant>>,
     pending_failures: Mutex<HashMap<String, PendingTurnFailure>>,
@@ -82,10 +84,23 @@ pub struct EventRulesEngine {
 
 impl EventRulesEngine {
     pub fn new(db: AppDatabase, manager: ConnectionManager, bus: Arc<InternalEventBus>) -> Self {
+        let data_dir = std::env::var_os("CODEG_DATA_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        Self::with_data_dir(db, manager, bus, data_dir)
+    }
+
+    pub fn with_data_dir(
+        db: AppDatabase,
+        manager: ConnectionManager,
+        bus: Arc<InternalEventBus>,
+        data_dir: PathBuf,
+    ) -> Self {
         Self {
             db,
             manager,
             bus,
+            data_dir,
             rules: Mutex::new(Vec::new()),
             recent_dedup: Mutex::new(HashMap::new()),
             pending_failures: Mutex::new(HashMap::new()),
@@ -764,6 +779,7 @@ impl EventRulesEngine {
         let prompt = render_action_prompt(action, event);
         let blocks = vec![PromptInputBlock::Text { text: prompt }];
 
+        let mut resumed = false;
         let conn_id = match action.conversation_ref {
             // A persistent conversation can temporarily have more than one
             // live ACP connection during reconnect/session preservation. The
@@ -781,9 +797,25 @@ impl EventRulesEngine {
                 {
                     id
                 } else {
-                    return Err(format!(
-                        "no live connection for conversation {conversation_id}"
-                    ));
+                    let Some((emitter, owner_window_label)) = self
+                        .manager
+                        .runtime_context_for_connection(&event.connection_id)
+                        .await
+                    else {
+                        return Err(format!(
+                            "conversation {conversation_id} is offline and source connection is unavailable"
+                        ));
+                    };
+                    resumed = true;
+                    self.manager
+                        .ensure_existing_conversation_ready(
+                            &self.db,
+                            &self.data_dir,
+                            conversation_id,
+                            owner_window_label,
+                            emitter,
+                        )
+                        .await?
                 }
             }
         };
@@ -793,7 +825,9 @@ impl EventRulesEngine {
         // direct `handle_lifecycle_event` test call cannot wedge the connection.
         if let Some(state) = self.manager.get_state(&conn_id).await {
             let snap = state.read().await;
-            if snap.folder_id != Some(folder_id) || snap.conversation_id != Some(conversation_id) {
+            if snap.folder_id != Some(folder_id)
+                || (!resumed && snap.conversation_id != Some(conversation_id))
+            {
                 return Err("live connection identity does not match target conversation".into());
             }
             if snap.turn_in_flight {

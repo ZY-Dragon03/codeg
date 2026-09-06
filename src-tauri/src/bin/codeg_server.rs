@@ -312,12 +312,13 @@ async fn async_main() -> ExitCode {
     codeg_lib::commands::delegation::apply_persisted_config(&state.db.conn, &delegation_broker)
         .await;
 
-    let event_engine = std::sync::Arc::new(codeg_lib::event_rules::EventRulesEngine::new(
+    let event_engine = std::sync::Arc::new(codeg_lib::event_rules::EventRulesEngine::with_data_dir(
         codeg_lib::db::AppDatabase {
             conn: state.db.conn.clone(),
         },
         state.connection_manager.clone_ref(),
         state.acp_event_bus.clone(),
+        state.data_dir.clone(),
     ));
     event_rules_engine.set(event_engine.clone());
     tokio::spawn(event_engine.run());
@@ -397,6 +398,7 @@ async fn async_main() -> ExitCode {
                     conn: state.db.conn.clone(),
                 },
                 manager: state.connection_manager.clone_ref(),
+                data_dir: state.data_dir.clone(),
                 tokens,
                 parent_lookup,
                 session_info: session_info_lookup,
@@ -528,6 +530,9 @@ async fn async_main() -> ExitCode {
             conn: state.db.conn.clone(),
         },
         state.connection_manager.clone_ref(),
+        state.data_dir.clone(),
+        state.emitter.clone(),
+        "web".to_owned(),
     );
     state
         .terminal_manager
