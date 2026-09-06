@@ -3476,6 +3476,74 @@ export async function eventRuleListLogs(params: {
   return getTransport().call("event_rule_list_logs", params)
 }
 
+type LegacyWakeRecord = {
+  id: number
+  source_conversation_id?: number | null
+  creator_kind?: string | null
+  creator_id?: string | null
+  source_connection_id?: string | null
+  terminal_id?: string | null
+  process_ref?: string | null
+  trigger_kind?: string | null
+  fire_at?: string | null
+  prompt?: string | null
+  status?: string | null
+  error?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  schedule?: WakeRecord["schedule"] | null
+  name?: string | null
+  enabled?: boolean
+  target?: string | null
+  target_conversation_id?: number | null
+  description?: string | null
+  provenance?: string
+  creator?: string | null
+}
+
+/** Convert the old wake_list row shape into the registry shape expected by
+ * AutomationRegistryPanel. The registry endpoint was added after wake_list,
+ * so older servers return database columns (snake_case) without schedule,
+ * name, or target fields. */
+function normalizeLegacyWake(wake: WakeRecord | LegacyWakeRecord): WakeRecord {
+  const raw = wake as LegacyWakeRecord
+  const createdAt = raw.created_at ?? new Date(0).toISOString()
+  const fireAt = raw.fire_at ?? null
+  const triggerKind = raw.trigger_kind ?? "process_exit"
+  const existingSchedule = raw.schedule ?? null
+  const schedule = existingSchedule ?? (triggerKind === "timer_after"
+    ? {
+        kind: "after" as const,
+        delay_ms: fireAt && Date.parse(fireAt) >= Date.parse(createdAt)
+          ? Math.max(1, Date.parse(fireAt) - Date.parse(createdAt))
+          : 1,
+      }
+    : triggerKind === "timer_at"
+      ? { kind: "at" as const, at: fireAt ?? createdAt }
+      : {
+          kind: "process_exit" as const,
+          process_id: raw.process_ref ?? raw.terminal_id ?? null,
+        })
+  const targetConversationId = raw.target_conversation_id ?? raw.source_conversation_id ?? null
+  const provenance = raw.provenance ?? raw.creator_kind ?? "user"
+  return {
+    id: raw.id,
+    name: raw.name ?? raw.prompt ?? `Wake #${raw.id}`,
+    enabled: raw.enabled ?? (raw.status === "pending" || raw.status === "dispatching"),
+    status: raw.status ?? null,
+    schedule,
+    prompt: raw.prompt ?? null,
+    target: raw.target ?? (targetConversationId == null ? null : `conversation:${targetConversationId}`),
+    target_conversation_id: targetConversationId,
+    description: raw.description ?? "one-shot wake",
+    creator: raw.creator ?? (raw.creator_id == null ? null : `agent:${raw.creator_id}`),
+    provenance,
+    created_at: raw.created_at ?? undefined,
+    updated_at: raw.updated_at ?? undefined,
+    cancelled_at: null,
+  }
+}
+
 /** Unified registry projection. Older servers may not expose this method; the
  * adapter falls back to EventRules so the page remains usable during rollout. */
 export async function automationRegistryList(): Promise<AutomationRegistryItem[]> {
@@ -3495,11 +3563,14 @@ export async function automationRegistryList(): Promise<AutomationRegistryItem[]
     type: "event_rule" as const,
     provenance: rule.builtin_key ? "builtin" : "user",
   }))
-  if (rules.some((item) => item.type === "wake")) return rules
+  const normalizedRules = rules.map((item) => item.type === "wake"
+    ? { ...normalizeLegacyWake(item as WakeRecord & LegacyWakeRecord), type: "wake" as const }
+    : item)
+  if (normalizedRules.some((item) => item.type === "wake")) return normalizedRules
   try {
-    return [...rules, ...(await wakeList()).map((wake) => ({ ...wake, type: "wake" as const }))]
+    return [...normalizedRules, ...(await wakeList()).map((wake) => ({ ...normalizeLegacyWake(wake), type: "wake" as const }))]
   } catch {
-    return rules
+    return normalizedRules
   }
 }
 
