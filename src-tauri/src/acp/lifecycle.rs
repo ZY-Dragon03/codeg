@@ -1746,6 +1746,7 @@ mod tests {
             state: Arc::new(RwLock::new(state)),
             emitter: EventEmitter::Noop,
             prompt_lock: Arc::new(tokio::sync::Mutex::new(())),
+            terminal_runtime: Arc::new(crate::acp::terminal_runtime::TerminalRuntime::with_base_env(std::collections::BTreeMap::new())),
             config_fingerprint: String::new(),
             last_observed_fingerprint: String::new(),
             child_pid: Arc::new(std::sync::atomic::AtomicU32::new(0)),

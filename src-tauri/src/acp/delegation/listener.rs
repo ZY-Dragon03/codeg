@@ -21,6 +21,7 @@ use crate::acp::delegation::transport::{
     read_frame, write_frame, BrokerAskRequest, BrokerCancelRequest, BrokerCancelTaskRequest,
     BrokerCancelWakeRequest, BrokerCommitFeedbackRequest, BrokerCreateAutomationRequest,
     BrokerCreateEventAutomationRequest, BrokerCreateWorkTaskRequest,
+    BrokerCreateTerminalRequest,
     BrokerDeleteOrCancelEventAutomationRequest, BrokerFeedbackRequest,
     BrokerListEventAutomationsRequest, BrokerListWakesRequest, BrokerMessage,
     BrokerReadConversationContextRequest, BrokerRequest, BrokerResponse, BrokerResumeTaskRequest,
@@ -72,6 +73,7 @@ pub trait ParentSessionLookup: Send + Sync {
 pub trait EventAutomationAccess: Send + Sync {
     async fn send_to_conversation(&self, req: BrokerSendToConversationRequest) -> Value;
     async fn read_conversation_context(&self, req: BrokerReadConversationContextRequest) -> Value;
+    async fn create_terminal(&self, req: BrokerCreateTerminalRequest) -> Value;
     async fn wake(&self, req: BrokerWakeRequest) -> Value;
     async fn list_wakes(&self, req: BrokerListWakesRequest) -> Value;
     async fn cancel_wake(&self, req: BrokerCancelWakeRequest) -> Value;
@@ -370,6 +372,31 @@ impl EventAutomationAccess for ConnectionEventAutomationAccess {
             "session": info,
             "authorization": authorization_json,
         })
+    }
+
+    async fn create_terminal(&self, req: BrokerCreateTerminalRequest) -> Value {
+        let (entry, _source_id) = match self.source(&req.token).await {
+            Ok(value) => value,
+            Err(error) => return Self::error_response(error).await,
+        };
+        match self
+            .manager
+            .create_terminal_for_connection(
+                &entry.parent_connection_id,
+                req.command,
+                req.args,
+                req.cwd,
+            )
+            .await
+        {
+            Ok(terminal_id) => serde_json::json!({
+                "ok": true,
+                "terminal_id": terminal_id,
+                "connection_id": entry.parent_connection_id,
+                "method": "terminal/create",
+            }),
+            Err(error) => Self::error_response(error).await,
+        }
     }
 
     async fn wake(&self, req: BrokerWakeRequest) -> Value {
@@ -903,6 +930,9 @@ impl DelegationListener {
             BrokerMessage::DeleteOrCancelEventAutomation(req) => {
                 generic_response(self.process_delete_or_cancel_event_automation(req).await)?
             }
+            BrokerMessage::CreateTerminal(req) => {
+                generic_response(self.process_create_terminal(req).await)?
+            }
             BrokerMessage::Cancel(cancel) => {
                 self.process_cancel(cancel).await;
                 // Empty ack — the companion only uses this to detect the
@@ -1269,6 +1299,16 @@ impl DelegationListener {
             return serde_json::json!({"ok": false, "error": "event automation access unavailable"});
         };
         access.read_conversation_context(req).await
+    }
+
+    async fn process_create_terminal(&self, req: BrokerCreateTerminalRequest) -> Value {
+        let Some(access) = self.event_automation.read().await.clone() else {
+            return serde_json::json!({
+                "ok": false,
+                "error": "event automation access unavailable"
+            });
+        };
+        access.create_terminal(req).await
     }
 
     async fn process_wake(&self, req: BrokerWakeRequest) -> Value {

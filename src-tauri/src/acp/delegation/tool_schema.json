@@ -441,6 +441,30 @@
     }
   },
   {
+    "name": "create_terminal",
+    "description": "Create a Codeg-hosted terminal using the ACP terminal/create semantics and return its authoritative terminal_id. Use this exact id with wake_on_process_exit.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["command"],
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Executable or shell command to run."
+        },
+        "args": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Optional command arguments."
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Optional absolute working directory."
+        }
+      }
+    }
+  },
+  {
     "name": "list_wakes",
     "description": "List persisted one-shot wakes owned by this conversation.",
     "inputSchema": {

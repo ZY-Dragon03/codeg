@@ -315,6 +315,18 @@ pub struct BrokerDeleteOrCancelEventAutomationRequest {
     pub kind: Option<String>,
 }
 
+/// MCP-facing equivalent of ACP `terminal/create`. The main process owns the
+/// terminal runtime and returns its authoritative id for process-exit wakes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrokerCreateTerminalRequest {
+    pub token: String,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+}
+
 /// Tagged top-level message dispatched by the listener. Adding new variants
 /// is the wire-stable way to grow the broker protocol without touching the
 /// frame layer.
@@ -343,6 +355,7 @@ pub enum BrokerMessage {
     ListEventAutomations(BrokerListEventAutomationsRequest),
     UpdateEventAutomation(BrokerUpdateEventAutomationRequest),
     DeleteOrCancelEventAutomation(BrokerDeleteOrCancelEventAutomationRequest),
+    CreateTerminal(BrokerCreateTerminalRequest),
 }
 
 /// The wrapped outcome the main process returns over the same socket.
@@ -572,6 +585,13 @@ pub async fn client_cancel_wake_round_trip(
     req: &BrokerCancelWakeRequest,
 ) -> io::Result<BrokerResponse> {
     message_round_trip(socket_path, &BrokerMessage::CancelWake(req.clone())).await
+}
+
+pub async fn client_create_terminal_round_trip(
+    socket_path: &str,
+    req: &BrokerCreateTerminalRequest,
+) -> io::Result<BrokerResponse> {
+    message_round_trip(socket_path, &BrokerMessage::CreateTerminal(req.clone())).await
 }
 
 pub async fn client_create_event_automation_round_trip(

@@ -5,6 +5,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 
+use sacp::schema::{CreateTerminalRequest, SessionId};
+
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ActiveValue::Set, DatabaseConnection, EntityTrait,
     ColumnTrait, QueryFilter, TransactionTrait,
@@ -420,6 +422,7 @@ impl ConnectionManager {
             state: Arc::new(tokio::sync::RwLock::new(state)),
             emitter,
             prompt_lock: Arc::new(tokio::sync::Mutex::new(())),
+            terminal_runtime: Arc::new(crate::acp::terminal_runtime::TerminalRuntime::with_base_env(std::collections::BTreeMap::new())),
             config_fingerprint: String::new(),
             last_observed_fingerprint: String::new(),
             child_pid: Arc::new(std::sync::atomic::AtomicU32::new(0)),
@@ -463,6 +466,7 @@ impl ConnectionManager {
             state: Arc::new(tokio::sync::RwLock::new(state)),
             emitter,
             prompt_lock: Arc::new(tokio::sync::Mutex::new(())),
+            terminal_runtime: Arc::new(crate::acp::terminal_runtime::TerminalRuntime::with_base_env(std::collections::BTreeMap::new())),
             config_fingerprint: String::new(),
             last_observed_fingerprint: String::new(),
             child_pid: Arc::new(std::sync::atomic::AtomicU32::new(0)),
@@ -2517,6 +2521,40 @@ impl ConnectionManager {
         connections.get(conn_id).map(|conn| conn.state.clone())
     }
 
+    /// Create a terminal through the same connection-scoped runtime used by
+    /// the ACP `terminal/create` channel. The caller must already hold the
+    /// authenticated parent connection identity; the runtime callback records
+    /// the returned id against that connection for process-exit wake ownership.
+    pub async fn create_terminal_for_connection(
+        &self,
+        conn_id: &str,
+        command: String,
+        args: Vec<String>,
+        cwd: Option<String>,
+    ) -> Result<String, String> {
+        let (terminal_runtime, state) = {
+            let connections = self.connections.lock().await;
+            let connection = connections
+                .get(conn_id)
+                .ok_or_else(|| "source connection is no longer live".to_owned())?;
+            (connection.terminal_runtime.clone(), connection.state.clone())
+        };
+        let session_id = state
+            .read()
+            .await
+            .external_id
+            .clone()
+            .ok_or_else(|| "connection has no native session identity".to_owned())?;
+        let mut request = CreateTerminalRequest::new(SessionId::new(session_id), command);
+        request.args = args;
+        request.cwd = cwd.map(PathBuf::from);
+        let response = terminal_runtime
+            .create_terminal(request)
+            .await
+            .map_err(|error| format!("{error:?}"))?;
+        Ok(response.terminal_id.to_string())
+    }
+
     /// Like `get_state`, but also clones the connection's `EventEmitter`.
     /// Used by the lifecycle subscriber when it needs to both update the
     /// per-session state and re-broadcast a derived event (e.g. emitting
@@ -3399,35 +3437,75 @@ impl ConnectionManager {
             .await
             .map_err(|error| error.to_string())?;
 
-        // `spawn_agent` waits for SessionStarted when resuming, so checking the
-        // returned connection is enough to reject a process that exited during
-        // handshake.  A fresh connection is never accepted merely because it
-        // has the right agent type: both the native session id and cwd must
-        // match the persisted row.
-        let connections = self.connections.lock().await;
-        let Some(connection) = connections.get(&connection_id) else {
-            return Err(format!(
-                "resumed connection for conversation {conversation_id} disappeared"
-            ));
-        };
-        let state = connection.state.read().await;
-        if connection.agent_type != agent_type
-            || state.external_id.as_deref() != Some(external_id.as_str())
-            || state
-                .conversation_id
-                .is_some_and(|bound_id| bound_id != conversation_id)
-            || state.working_dir.as_deref().map(std::path::Path::to_string_lossy)
-                != Some(std::borrow::Cow::Owned(working_dir.clone()))
-            || state.status != ConnectionStatus::Connected
-            || state.turn_in_flight
-            || state.pending_permission.is_some()
-            || state.has_active_background_work(chrono::Utc::now())
-        {
-            return Err(format!(
-                "conversation {conversation_id} resumed session is not connected and idle"
-            ));
+        // `spawn_agent` waits for the native session identity, but the ACP
+        // status can remain Connecting for a short window while the resumed
+        // process finishes its handshake.  Automatic sends must wait for that
+        // exact connection to become Connected + idle instead of treating the
+        // existing row as permanently unavailable.  The bounded wait also
+        // covers a concurrent reconnect that `spawn_agent` deduplicated.
+        let deadline = tokio::time::Instant::now() + self.spawn_handshake_timeout;
+        loop {
+            let readiness = {
+                let connections = self.connections.lock().await;
+                let Some(connection) = connections.get(&connection_id) else {
+                    return Err(format!(
+                        "resumed connection for conversation {conversation_id} disappeared"
+                    ));
+                };
+                if connection.agent_type != agent_type {
+                    return Err(format!(
+                        "resumed connection for conversation {conversation_id} has wrong agent type"
+                    ));
+                }
+                let state = connection.state.read().await;
+                if matches!(state.status, ConnectionStatus::Disconnected | ConnectionStatus::Error)
+                {
+                    return Err(format!(
+                        "conversation {conversation_id} resumed session terminated during handshake"
+                    ));
+                }
+                if state.external_id.as_deref().is_some_and(|id| id != external_id) {
+                    return Err(format!(
+                        "resumed connection for conversation {conversation_id} has wrong native session identity"
+                    ));
+                }
+                if state
+                    .working_dir
+                    .as_deref()
+                    .is_some_and(|path| path.to_string_lossy() != working_dir)
+                {
+                    return Err(format!(
+                        "resumed connection for conversation {conversation_id} has wrong working directory"
+                    ));
+                }
+                if state
+                    .conversation_id
+                    .is_some_and(|bound_id| bound_id != conversation_id)
+                {
+                    return Err(format!(
+                        "resumed connection for conversation {conversation_id} is bound to another conversation"
+                    ));
+                }
+                state.status == ConnectionStatus::Connected
+                    && state.external_id.as_deref() == Some(external_id.as_str())
+                    && state
+                        .working_dir
+                        .as_deref()
+                        .is_some_and(|path| path.to_string_lossy() == working_dir)
+                    && !state.turn_in_flight
+                    && state.pending_permission.is_none()
+                    && !state.has_active_background_work(chrono::Utc::now())
+            };
+            if readiness {
+                return Ok(connection_id);
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(format!(
+                    "conversation {conversation_id} resumed session is not connected and idle"
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        Ok(connection_id)
     }
 
     /// Snapshot the emitter and owner label for a live connection so a
@@ -3947,6 +4025,7 @@ mod tests {
             state: Arc::new(RwLock::new(state)),
             emitter: EventEmitter::Noop,
             prompt_lock: Arc::new(tokio::sync::Mutex::new(())),
+            terminal_runtime: Arc::new(crate::acp::terminal_runtime::TerminalRuntime::with_base_env(std::collections::BTreeMap::new())),
             config_fingerprint: String::new(),
             last_observed_fingerprint: String::new(),
             child_pid: Arc::new(std::sync::atomic::AtomicU32::new(0)),
@@ -4277,6 +4356,7 @@ mod tests {
             state: Arc::new(RwLock::new(state)),
             emitter: EventEmitter::Noop,
             prompt_lock: Arc::new(tokio::sync::Mutex::new(())),
+            terminal_runtime: Arc::new(crate::acp::terminal_runtime::TerminalRuntime::with_base_env(std::collections::BTreeMap::new())),
             config_fingerprint: String::new(),
             last_observed_fingerprint: String::new(),
             child_pid: Arc::new(std::sync::atomic::AtomicU32::new(0)),
@@ -5170,6 +5250,7 @@ mod tests {
             state: Arc::new(RwLock::new(state)),
             emitter: EventEmitter::Noop,
             prompt_lock: Arc::new(tokio::sync::Mutex::new(())),
+            terminal_runtime: Arc::new(crate::acp::terminal_runtime::TerminalRuntime::with_base_env(std::collections::BTreeMap::new())),
             config_fingerprint: String::new(),
             last_observed_fingerprint: String::new(),
             child_pid: Arc::new(std::sync::atomic::AtomicU32::new(0)),
@@ -6839,6 +6920,7 @@ mod tests {
             state: Arc::new(RwLock::new(state)),
             emitter: EventEmitter::Noop,
             prompt_lock: Arc::new(tokio::sync::Mutex::new(())),
+            terminal_runtime: Arc::new(crate::acp::terminal_runtime::TerminalRuntime::with_base_env(std::collections::BTreeMap::new())),
             config_fingerprint: String::new(),
             last_observed_fingerprint: String::new(),
             child_pid: Arc::new(std::sync::atomic::AtomicU32::new(0)),
@@ -7510,6 +7592,7 @@ mod tests {
             state: Arc::new(RwLock::new(state)),
             emitter: EventEmitter::Noop,
             prompt_lock: Arc::new(tokio::sync::Mutex::new(())),
+            terminal_runtime: Arc::new(crate::acp::terminal_runtime::TerminalRuntime::with_base_env(std::collections::BTreeMap::new())),
             config_fingerprint: String::new(),
             last_observed_fingerprint: String::new(),
             child_pid: Arc::new(std::sync::atomic::AtomicU32::new(0)),

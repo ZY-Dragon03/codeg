@@ -1096,6 +1096,11 @@ pub struct AgentConnection {
     /// in the same turn.
     pub prompt_lock: Arc<tokio::sync::Mutex<()>>,
 
+    /// Connection-scoped terminal runtime shared by native ACP requests and
+    /// the authenticated event-automation terminal bridge. Keeping one runtime
+    /// preserves terminal ownership and process lifetime across both paths.
+    pub terminal_runtime: Arc<TerminalRuntime>,
+
     /// Canonical fingerprint of the agent's effective config (env vars + model
     /// provider creds + native config file content) captured at spawn. The
     /// running process is locked to THIS config; comparing it against a freshly
@@ -2046,6 +2051,66 @@ pub async fn spawn_agent_connection(
     // them right after install (before install.ps1's User-PATH change lands).
     prepend_officecli_path(&mut terminal_base_env);
 
+    // Acquire the map lock before constructing the connection-scoped runtime.
+    // `TerminalRuntime` is shared with the broker bridge, so keeping its
+    // construction after the final async wait prevents the spawn future from
+    // carrying the runtime across an await boundary.
+    let mut connections_guard = connections.lock().await;
+
+    // Share the exact ACP terminal runtime with the authenticated MCP bridge.
+    // The callbacks are the scheduler's ownership boundary: every returned id
+    // is registered to this connection, and process exit resolves wakes only
+    // for the conversation currently bound to this connection.
+    let terminal_created_callback = wake_scheduler.as_ref().map(|scheduler| {
+        let scheduler = scheduler.clone();
+        let source_connection_id = connection_id.clone();
+        Arc::new(move |terminal_id: String| {
+            scheduler.register_terminal(terminal_id, source_connection_id.clone());
+        }) as Arc<dyn Fn(String) + Send + Sync>
+    });
+    let process_exit_callback = wake_scheduler.as_ref().map(|scheduler| {
+        let scheduler = scheduler.clone();
+        let state = Arc::clone(&session_state);
+        let source_connection_id = connection_id.clone();
+        Arc::new(move |terminal_id: String| {
+            let scheduler = scheduler.clone();
+            let state = Arc::clone(&state);
+            let source_connection_id = source_connection_id.clone();
+            let runtime = tokio::runtime::Handle::current();
+            // Keep the terminal callback synchronous and let a blocking
+            // runtime worker drive the scheduler future. This avoids making
+            // the connection-spawn future recursively depend on the scheduler
+            // dispatch path (which can itself resume a connection).
+            tokio::task::spawn_blocking(move || {
+                runtime.block_on(async move {
+                    let source_conversation_id = state.read().await.conversation_id;
+                    if let Some(source_conversation_id) = source_conversation_id {
+                        scheduler
+                            .on_process_exit_for_source(
+                                &terminal_id,
+                                source_conversation_id,
+                                &source_connection_id,
+                            )
+                            .await;
+                    } else {
+                        tracing::warn!(
+                            terminal_id,
+                            source_connection_id,
+                            "[wake] process exited before its ACP conversation identity was bound"
+                        );
+                    }
+                });
+            });
+        }) as Arc<dyn Fn(String) + Send + Sync>
+    });
+    let terminal_runtime = Arc::new(
+        TerminalRuntime::with_base_env(terminal_base_env)
+            .with_default_cwd(Some(launch_cwd.clone()))
+            .with_default_shell_config(terminal_shell_config)
+            .with_terminal_created_callback(terminal_created_callback)
+            .with_process_exit_callback(process_exit_callback),
+    );
+
     let (cmd_tx, cmd_rx) = mpsc::channel::<ConnectionCommand>(32);
     let conn_id = connection_id.clone();
     let emitter_clone = emitter.clone();
@@ -2063,7 +2128,7 @@ pub async fn spawn_agent_connection(
     // Insert the entry BEFORE spawning the background task so that a
     // fast-failing `run_connection` can never remove it before it was
     // inserted (would otherwise leak the entry).
-    connections.lock().await.insert(
+    connections_guard.insert(
         connection_id.clone(),
         AgentConnection {
             id: connection_id,
@@ -2074,6 +2139,7 @@ pub async fn spawn_agent_connection(
             state: Arc::clone(&session_state),
             emitter: emitter.clone(),
             prompt_lock: Arc::new(tokio::sync::Mutex::new(())),
+            terminal_runtime: Arc::clone(&terminal_runtime),
             last_observed_fingerprint: config_fingerprint.clone(),
             config_fingerprint,
             child_pid,
@@ -2114,15 +2180,13 @@ pub async fn spawn_agent_connection(
             cmd_rx,
             emitter_clone.clone(),
             Arc::clone(&state_clone),
-            terminal_base_env,
-            terminal_shell_config,
+            Arc::clone(&terminal_runtime),
             preferred_mode_id,
             preferred_config_values,
             delegation_injection,
             fs_policy,
             host_tools,
             stderr_tail,
-            wake_scheduler,
         )
         .await;
 
@@ -4683,8 +4747,7 @@ async fn run_connection(
     mut cmd_rx: mpsc::Receiver<ConnectionCommand>,
     emitter: EventEmitter,
     state: Arc<RwLock<SessionState>>,
-    terminal_base_env: BTreeMap<String, String>,
-    terminal_shell_config: TerminalShellRuntimeConfig,
+    terminal_runtime: Arc<TerminalRuntime>,
     preferred_mode_id: Option<String>,
     preferred_config_values: BTreeMap<String, String>,
     delegation_injection: Option<DelegationInjection>,
@@ -4694,58 +4757,10 @@ async fn run_connection(
     // callback installed by `build_agent`. Read only when a turn ends without
     // agent output, to attach evidence to the synthesized error.
     stderr_tail: Arc<StderrTail>,
-    wake_scheduler: Option<Arc<crate::wake_scheduler::WakeScheduler>>,
 ) -> Result<(), AcpError> {
     let pending_perms: PendingPermissions =
         Arc::new(tokio::sync::Mutex::new(PermissionQueue::default()));
-    // `terminal_base_env` already filtered to just the credential helper
-    // keys upstream — see `spawn_agent_connection` for the rationale and
-    // why we don't forward the full agent runtime_env here.
     let cwd = resolve_working_dir(working_dir.as_deref());
-    // Default terminals to the session working directory so an agent that calls
-    // `terminal/create` without a `cwd` (e.g. CodeBuddy) runs in the folder the
-    // conversation runs in rather than codeg's own process cwd.
-    let terminal_created_callback = wake_scheduler.as_ref().map(|scheduler| {
-        let scheduler = scheduler.clone();
-        let source_connection_id = connection_id.clone();
-        Arc::new(move |terminal_id: String| {
-            scheduler.register_terminal(terminal_id, source_connection_id.clone());
-        }) as Arc<dyn Fn(String) + Send + Sync>
-    });
-    let process_exit_callback = wake_scheduler.map(|scheduler| {
-        let state = Arc::clone(&state);
-        let source_connection_id = connection_id.clone();
-        Arc::new(move |terminal_id: String| {
-            let scheduler = scheduler.clone();
-            let state = Arc::clone(&state);
-            let source_connection_id = source_connection_id.clone();
-            tokio::spawn(async move {
-                let source_conversation_id = state.read().await.conversation_id;
-                if let Some(source_conversation_id) = source_conversation_id {
-                    scheduler
-                        .on_process_exit_for_source(
-                            &terminal_id,
-                            source_conversation_id,
-                            &source_connection_id,
-                        )
-                        .await;
-                } else {
-                    tracing::warn!(
-                        terminal_id,
-                        source_connection_id,
-                        "[wake] process exited before its ACP conversation identity was bound"
-                    );
-                }
-            });
-        }) as Arc<dyn Fn(String) + Send + Sync>
-    });
-    let terminal_runtime = Arc::new(
-        TerminalRuntime::with_base_env(terminal_base_env)
-            .with_default_cwd(Some(cwd.clone()))
-            .with_default_shell_config(terminal_shell_config)
-            .with_terminal_created_callback(terminal_created_callback)
-            .with_process_exit_callback(process_exit_callback),
-    );
     let cwd_string = cwd.to_string_lossy().to_string();
     // The connection's security posture in one place, so what a live session
     // actually enforces is readable from the log rather than inferred.

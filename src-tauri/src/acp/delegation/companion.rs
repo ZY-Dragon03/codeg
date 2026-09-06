@@ -48,6 +48,7 @@ use crate::acp::delegation::transport::{
     client_ask_round_trip, client_cancel, client_cancel_task_round_trip,
     client_cancel_wake_round_trip, client_commit_feedback, client_create_automation_round_trip,
     client_create_event_automation_round_trip, client_create_work_task_round_trip,
+    client_create_terminal_round_trip,
     client_delete_or_cancel_event_automation_round_trip, client_feedback_round_trip,
     client_list_event_automations_round_trip, client_list_wakes_round_trip,
     client_read_conversation_context_round_trip, client_resume_task_round_trip, client_round_trip,
@@ -56,7 +57,8 @@ use crate::acp::delegation::transport::{
     client_update_event_automation_round_trip, client_wake_round_trip, BrokerAskRequest,
     BrokerCancelRequest, BrokerCancelTaskRequest, BrokerCancelWakeRequest,
     BrokerCommitFeedbackRequest, BrokerCreateAutomationRequest, BrokerCreateEventAutomationRequest,
-    BrokerCreateWorkTaskRequest, BrokerDeleteOrCancelEventAutomationRequest, BrokerFeedbackRequest,
+    BrokerCreateTerminalRequest, BrokerCreateWorkTaskRequest,
+    BrokerDeleteOrCancelEventAutomationRequest, BrokerFeedbackRequest,
     BrokerListEventAutomationsRequest, BrokerListWakesRequest,
     BrokerReadConversationContextRequest, BrokerRequest, BrokerResponse, BrokerResumeTaskRequest,
     BrokerSendToConversationRequest, BrokerSessionRequest, BrokerStatusRequest,
@@ -225,7 +227,8 @@ impl CompanionFeatures {
             | "wake_at"
             | "wake_on_process_exit"
             | "list_wakes"
-            | "cancel_wake" => {
+            | "cancel_wake"
+            | "create_terminal" => {
                 // These capabilities are part of the authenticated parent
                 // delegation channel. They do not depend on the optional
                 // transcript/session-info toggle.
@@ -821,6 +824,60 @@ async fn build_tools_call_spawn(
             };
             let round_trip = Box::pin(async move { client_wake_round_trip(&socket, &req).await });
             register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
+        }
+        "create_terminal" => {
+            let Some(command) = arguments
+                .get("command")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                return LineAction::Respond(err(
+                    id,
+                    -32602,
+                    "create_terminal requires non-empty command",
+                ));
+            };
+            let args = match arguments.get("args") {
+                None => Vec::new(),
+                Some(Value::Array(values)) => {
+                    let mut parsed = Vec::with_capacity(values.len());
+                    for value in values {
+                        let Some(arg) = value.as_str() else {
+                            return LineAction::Respond(err(
+                                id,
+                                -32602,
+                                "create_terminal args must be strings",
+                            ));
+                        };
+                        parsed.push(arg.to_owned());
+                    }
+                    parsed
+                }
+                Some(_) => {
+                    return LineAction::Respond(err(
+                        id,
+                        -32602,
+                        "create_terminal args must be an array of strings",
+                    ));
+                }
+            };
+            let cwd = arguments
+                .get("cwd")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned);
+            let req = BrokerCreateTerminalRequest {
+                token: ctx.token.clone(),
+                command: command.to_owned(),
+                args,
+                cwd,
+            };
+            let round_trip = Box::pin(async move {
+                client_create_terminal_round_trip(&socket, &req).await
+            });
+            register_and_spawn(inflight, id, None, round_trip, render_terminal_result).await
         }
         "list_wakes" => {
             let req = BrokerListWakesRequest {
@@ -1631,6 +1688,19 @@ pub fn render_session_result(outcome: &Value) -> Value {
 /// target/receipt fields.
 pub fn render_passthrough(outcome: &Value) -> Value {
     outcome.clone()
+}
+
+/// Render the authoritative terminal/create response as a regular MCP
+/// CallToolResult. The terminal id must be visible in `content` because some
+/// ACP clients persist only that field when handing a tool result back to the
+/// agent. `structuredContent` preserves the machine-readable envelope.
+pub fn render_terminal_result(outcome: &Value) -> Value {
+    let text = serde_json::to_string(outcome).unwrap_or_else(|_| outcome.to_string());
+    json!({
+        "content": [{ "type": "text", "text": text }],
+        "isError": outcome.get("ok").and_then(Value::as_bool) == Some(false),
+        "structuredContent": outcome.clone(),
+    })
 }
 
 /// Map a `task_progress` / `task_complete` round-trip outcome (a
@@ -2542,6 +2612,7 @@ mod tests {
             "wake_after",
             "wake_at",
             "wake_on_process_exit",
+            "create_terminal",
             "list_wakes",
             "cancel_wake",
             "create_event_automation",
