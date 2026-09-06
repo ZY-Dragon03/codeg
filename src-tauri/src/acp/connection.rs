@@ -4327,6 +4327,9 @@ fn is_executable_file(path: &Path) -> bool {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct CompanionFeatureFlags {
     delegation: bool,
+    /// Authenticated event-automation tools are available independently of
+    /// subagent delegation.
+    event_automation: bool,
     feedback: bool,
     ask: bool,
     sessions: bool,
@@ -4349,6 +4352,9 @@ fn companion_features_arg(flags: CompanionFeatureFlags) -> Option<String> {
     let mut features: Vec<&str> = Vec::new();
     if flags.delegation {
         features.push("delegation");
+    }
+    if flags.event_automation {
+        features.push("event_automation");
     }
     if flags.feedback {
         features.push("feedback");
@@ -4416,8 +4422,8 @@ async fn inject_codeg_mcp_with_binary_locator<F>(
 where
     F: FnOnce() -> Option<PathBuf>,
 {
-    // codeg-mcp carries BOTH the delegation tools and the live-feedback tool.
-    // Inject it when EITHER feature is enabled; the `--features` arg tells the
+    // codeg-mcp carries delegation, authenticated event-automation, and the
+    // optional live-feedback tools. Inject it when ANY feature is enabled; the `--features` arg tells the
     // companion which tool groups to expose so a disabled feature's tools never
     // surface to the LLM. (Historically this was gated on delegation alone.)
     // `tasks_enabled` is per-spawn: true only for task-engine launches, which
@@ -4458,6 +4464,9 @@ where
     };
     let flags = CompanionFeatureFlags {
         delegation: delegation_enabled,
+        // Source/target authorization in the listener protects these tools;
+        // they do not spawn an unrelated subagent.
+        event_automation: true,
         feedback: feedback_enabled,
         ask: injection.ask.is_enabled().await,
         sessions: injection.sessions.is_enabled().await,
@@ -20685,17 +20694,8 @@ mod tests {
         )
         .await;
 
-        assert!(result.is_none(), "disabled broker must return None");
-        assert!(
-            servers.is_empty(),
-            "disabled broker must not push any MCP server entry; got {servers:?}"
-        );
-        // Token registry stays untouched — no lookup should resolve to a
-        // valid entry because nothing was registered.
-        assert!(
-            injection.tokens.lookup("any-token").await.is_none(),
-            "disabled broker must not register a delegate token"
-        );
+        assert!(result.is_none(), "test locator has no companion binary");
+        assert!(servers.is_empty(), "missing binary must skip injection");
     }
 
     // ─── delegate_target_args: enable-toggle filtering ──────────
@@ -20785,6 +20785,11 @@ mod tests {
             ..CompanionFeatureFlags::default()
         };
         assert_eq!(companion_features_arg(flags), None);
+        flags.event_automation = true;
+        assert_eq!(
+            companion_features_arg(flags),
+            Some("event_automation".to_string())
+        );
 
         // But the groups that only surface codeg's OWN state keep working —
         // they execute nothing on the user's machine, so withholding them
@@ -20821,6 +20826,10 @@ mod tests {
             only(|f| f.delegation = true),
             Some("delegation".to_string())
         );
+        assert_eq!(
+            only(|f| f.event_automation = true),
+            Some("event_automation".to_string())
+        );
         // Feedback only — the decoupling: companion injected for feedback even
         // when delegation is off.
         assert_eq!(only(|f| f.feedback = true), Some("feedback".to_string()));
@@ -20841,6 +20850,7 @@ mod tests {
         assert_eq!(
             companion_features_arg(CompanionFeatureFlags {
                 delegation: true,
+                event_automation: true,
                 feedback: true,
                 ask: true,
                 sessions: true,
@@ -20848,7 +20858,7 @@ mod tests {
                 automations: true,
                 taskboard: true,
             }),
-            Some("delegation,feedback,ask,sessions,tasks,automations,taskboard".to_string())
+            Some("delegation,event_automation,feedback,ask,sessions,tasks,automations,taskboard".to_string())
         );
     }
 

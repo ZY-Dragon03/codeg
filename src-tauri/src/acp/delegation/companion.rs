@@ -147,6 +147,10 @@ pub fn err(id: Value, code: i64, message: impl Into<String>) -> JsonRpcResponse 
 #[derive(Debug, Clone, Copy)]
 pub struct CompanionFeatures {
     pub delegation: bool,
+    /// Authenticated event-automation tools (send/read/wake) are independent
+    /// of subagent delegation. The per-launch token and listener still enforce
+    /// source and target authorization for every call.
+    pub event_automation: bool,
     pub feedback: bool,
     pub ask: bool,
     pub sessions: bool,
@@ -161,7 +165,7 @@ pub struct CompanionFeatures {
 
 impl CompanionFeatures {
     /// Parse the comma-joined `--features` value (e.g.
-    /// `delegation,feedback,ask,sessions,automations,taskboard`). Unknown tokens
+    /// `delegation,event_automation,feedback,ask,sessions,automations,taskboard`). Unknown tokens
     /// are ignored. An absent
     /// value (`None`) defaults to delegation-only — backward compatible with a
     /// parent that predates feature gating (companion + listener ship together, so
@@ -170,6 +174,7 @@ impl CompanionFeatures {
         let Some(s) = raw else {
             return Self {
                 delegation: true,
+                event_automation: false,
                 feedback: false,
                 ask: false,
                 sessions: false,
@@ -180,6 +185,7 @@ impl CompanionFeatures {
         };
         let mut f = Self {
             delegation: false,
+            event_automation: false,
             feedback: false,
             ask: false,
             sessions: false,
@@ -190,6 +196,7 @@ impl CompanionFeatures {
         for tok in s.split(',').map(str::trim).filter(|t| !t.is_empty()) {
             match tok {
                 "delegation" => f.delegation = true,
+                "event_automation" => f.event_automation = true,
                 "feedback" => f.feedback = true,
                 "ask" => f.ask = true,
                 "sessions" => f.sessions = true,
@@ -213,7 +220,7 @@ impl CompanionFeatures {
                 // These capabilities are part of the authenticated parent
                 // delegation channel. They do not depend on the optional
                 // transcript/session-info toggle.
-                self.delegation
+                self.event_automation
             }
             "task_progress" | "task_complete" => self.tasks,
             "create_automation" => self.automations,
@@ -1669,6 +1676,7 @@ mod tests {
         // keep seeing exactly the three delegation tools.
         ctx_with(CompanionFeatures {
             delegation: true,
+            event_automation: false,
             feedback: false,
             ask: false,
             sessions: false,
@@ -2263,7 +2271,18 @@ mod tests {
 
     const FEEDBACK_ONLY: CompanionFeatures = CompanionFeatures {
         delegation: false,
+        event_automation: false,
         feedback: true,
+        ask: false,
+        sessions: false,
+        tasks: false,
+        automations: false,
+        taskboard: false,
+    };
+    const EVENT_AUTOMATION_ONLY: CompanionFeatures = CompanionFeatures {
+        delegation: false,
+        event_automation: true,
+        feedback: false,
         ask: false,
         sessions: false,
         tasks: false,
@@ -2272,6 +2291,7 @@ mod tests {
     };
     const BOTH: CompanionFeatures = CompanionFeatures {
         delegation: true,
+        event_automation: false,
         feedback: true,
         ask: false,
         sessions: false,
@@ -2281,6 +2301,7 @@ mod tests {
     };
     const ASK_ONLY: CompanionFeatures = CompanionFeatures {
         delegation: false,
+        event_automation: false,
         feedback: false,
         ask: true,
         sessions: false,
@@ -2290,6 +2311,7 @@ mod tests {
     };
     const SESSIONS_ONLY: CompanionFeatures = CompanionFeatures {
         delegation: false,
+        event_automation: false,
         feedback: false,
         ask: false,
         sessions: true,
@@ -2346,6 +2368,29 @@ mod tests {
         );
         assert!(names.contains(&"check_user_feedback".to_string()));
         assert_eq!(names.len(), 12);
+    }
+
+    #[tokio::test]
+    async fn event_automation_tools_are_listed_without_delegation() {
+        let names = list_tool_names(
+            dispatch_with_features(
+                EVENT_AUTOMATION_ONLY,
+                r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+            )
+            .await,
+        );
+        for name in [
+            "send_to_conversation",
+            "read_conversation_context",
+            "wake_after",
+            "wake_at",
+            "wake_on_process_exit",
+            "list_wakes",
+            "cancel_wake",
+        ] {
+            assert!(names.iter().any(|actual| actual == name), "missing {name}");
+        }
+        assert!(!names.iter().any(|actual| actual == "delegate_to_agent"));
     }
 
     #[tokio::test]
@@ -2628,6 +2673,7 @@ mod tests {
 
     const AUTOMATIONS_ONLY: CompanionFeatures = CompanionFeatures {
         delegation: false,
+        event_automation: false,
         feedback: false,
         ask: false,
         sessions: false,
@@ -2637,6 +2683,7 @@ mod tests {
     };
     const TASKBOARD_ONLY: CompanionFeatures = CompanionFeatures {
         delegation: false,
+        event_automation: false,
         feedback: false,
         ask: false,
         sessions: false,
