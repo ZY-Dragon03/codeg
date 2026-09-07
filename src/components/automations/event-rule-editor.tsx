@@ -302,55 +302,6 @@ export function EventRuleEditor({
 
       <fieldset className="grid gap-3 rounded-xl border p-4">
         <legend className="px-1 text-sm font-semibold">
-          {t("editor.creationType")}
-        </legend>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <Button
-            type="button"
-            variant={
-              (draft.config.automation_type ?? "content_detection") ===
-              "content_detection"
-                ? "default"
-                : "outline"
-            }
-            onClick={() =>
-              update((d) => ({
-                ...d,
-                config: {
-                  ...d.config,
-                  automation_type: "content_detection",
-                  trigger: "content_matched",
-                },
-              }))
-            }
-          >
-            {t("editor.contentDetection")}
-          </Button>
-          <Button
-            type="button"
-            variant={
-              draft.config.automation_type === "forward_after_task_completion"
-                ? "default"
-                : "outline"
-            }
-            onClick={() =>
-              update((d) => ({
-                ...d,
-                config: {
-                  ...d.config,
-                  automation_type: "forward_after_task_completion",
-                  trigger: "turn_completed",
-                },
-              }))
-            }
-          >
-            {t("editor.forwardAfterCompletion")}
-          </Button>
-        </div>
-      </fieldset>
-
-      <fieldset className="grid gap-3 rounded-xl border p-4">
-        <legend className="px-1 text-sm font-semibold">
           {t("editor.when")}
         </legend>
         <p className="text-sm text-muted-foreground">

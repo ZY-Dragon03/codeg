@@ -77,6 +77,20 @@ The menu MUST search all Event Automations and sort by enabled descending, appli
 - **WHEN** the menu is opened for conversation C
 - **THEN** it MUST include applicable global/folder/agent/conversation rules, mark inherited rules, and apply the specified stable sort
 
+### Requirement: Creation entry MUST fix automation type in the editor
+
+Add custom MUST open a type-specific editor for Content detection or Forward after task completion. The editor MUST NOT expose an in-editor automation-type switch; the chosen creation entry is the only way to pick the type for a new rule. Editing an existing rule MUST preserve its stored type without offering a type switch.
+
+#### Scenario: Content detection from conversation menu
+
+- **WHEN** the user chooses Add custom → Content detection for conversation C
+- **THEN** the editor MUST open as a content-detection rule with `content_matched` trigger and MUST NOT show automation-type toggle buttons
+
+#### Scenario: Forward after task completion from conversation menu
+
+- **WHEN** the user chooses Add custom → Forward after task completion for conversation C
+- **THEN** the editor MUST open as a completion-forwarding rule with `turn_completed` trigger and MUST NOT show automation-type toggle buttons
+
 ### Requirement: Content detection MUST settle before dispatch
 
 Content rules MUST select AI output, error or both and support Contains ANY/ALL, Regex and structured error category/severity/title/details plus text matching. A streaming match MAY set pending `matched=true`, but MUST NOT send while the turn is active; the action is evaluated once after settle.

@@ -162,18 +162,8 @@ describe("EventAutomationsPanel product surface", () => {
     )
 
     expect(
-      screen.getByText(zhCN.EventAutomations.editor.creationType)
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole("button", {
-        name: zhCN.EventAutomations.editor.contentDetection,
-      })
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole("button", {
-        name: zhCN.EventAutomations.editor.forwardAfterCompletion,
-      })
-    ).toBeInTheDocument()
+      screen.queryByText(zhCN.EventAutomations.editor.creationType)
+    ).not.toBeInTheDocument()
 
     fireEvent.click(
       screen.getByRole("button", { name: zhCN.EventAutomations.editor.save })

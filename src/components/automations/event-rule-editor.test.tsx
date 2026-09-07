@@ -125,7 +125,7 @@ describe("EventRuleEditor", () => {
     expect(draft.config.trigger).toBe("turn_completed")
   })
 
-  it("opens with completion forwarding selected when requested", () => {
+  it("does not render an in-editor automation type switcher", () => {
     render(
       withIntl(
         <EventRuleEditor
@@ -137,12 +137,14 @@ describe("EventRuleEditor", () => {
     )
 
     expect(
-      screen.getByRole("button", { name: "Forward after task completion" })
-    ).toHaveAttribute("data-variant", "default")
-    expect(screen.getByRole("button", { name: "Content detection" })).toHaveAttribute(
-      "data-variant",
-      "outline"
-    )
+      screen.queryByText(enMessages.EventAutomations.editor.creationType)
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Content detection" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Forward after task completion" })
+    ).not.toBeInTheDocument()
   })
 
   it("renders structured backend validation errors instead of object text", async () => {
