@@ -37,18 +37,31 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 
+export type EventRuleAutomationType =
+  | "content_detection"
+  | "forward_after_task_completion"
+
 export function newEventRuleDraft(
   scope: EventRuleScope = { kind: "global" },
-  defaults?: { name?: string; prompt?: string; keywords?: string[] }
+  defaults?: {
+    name?: string
+    prompt?: string
+    keywords?: string[]
+    automationType?: EventRuleAutomationType
+  }
 ): EventRuleDraft {
+  const automationType = defaults?.automationType ?? "content_detection"
   return {
     name: defaults?.name ?? "Retry failed turn",
     enabled: false,
     priority: 0,
     config: {
-      automation_type: "content_detection",
+      automation_type: automationType,
       scope,
-      trigger: "content_matched",
+      trigger:
+        automationType === "forward_after_task_completion"
+          ? "turn_completed"
+          : "content_matched",
       condition: {
         kind: "contains",
         source: "ai_output",
@@ -124,6 +137,7 @@ function needsAdvanced(
 export function EventRuleEditor({
   rule,
   initialScope,
+  initialAutomationType,
   conversations,
   folders = [],
   agentTypes = ALL_AGENT_TYPES,
@@ -132,6 +146,7 @@ export function EventRuleEditor({
 }: {
   rule?: EventRule | null
   initialScope?: EventRuleScope
+  initialAutomationType?: EventRuleAutomationType
   conversations: DbConversationSummary[]
   folders?: readonly FolderSelectOption[]
   agentTypes?: readonly AgentType[]
@@ -143,6 +158,7 @@ export function EventRuleEditor({
     rule
       ? copyDraft(rule)
       : newEventRuleDraft(initialScope, {
+          automationType: initialAutomationType,
           name: t("editor.defaultName"),
           prompt: t("editor.defaultPrompt"),
           keywords: ["RetriableError", "TLS", "connection reset"],

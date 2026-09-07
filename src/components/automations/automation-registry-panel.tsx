@@ -11,7 +11,10 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { EventRuleEditor } from "./event-rule-editor"
+import {
+  EventRuleEditor,
+  type EventRuleAutomationType,
+} from "./event-rule-editor"
 
 type SortKey = "active" | "applicable" | "priority" | "id"
 const isEventRule = (item: AutomationRegistryItem): item is AutomationRegistryEventRule => "config" in item
@@ -42,6 +45,8 @@ export function AutomationRegistryPanel({
   const [search, setSearch] = useState("")
   const [sort, setSort] = useState<SortKey>("active")
   const [editingRule, setEditingRule] = useState<EventRule | "new" | null>(null)
+  const [newAutomationType, setNewAutomationType] =
+    useState<EventRuleAutomationType>("content_detection")
   const [editingWake, setEditingWake] = useState<WakeRecord | "new" | null>(null)
   const [selectedLogRule, setSelectedLogRule] = useState<number | null>(null)
   const [logs, setLogs] = useState<EventRuleLog[]>([])
@@ -119,7 +124,32 @@ export function AutomationRegistryPanel({
   }
 
   const initialScope = conversationId == null ? { kind: "global" as const } : { kind: "conversation" as const, conversation_id: conversationId }
-  if (editingRule) return <div className="h-full overflow-auto"><EventRuleEditor rule={editingRule === "new" ? null : editingRule} initialScope={editingRule === "new" ? initialScope : undefined} conversations={conversations} folders={folders.map((f) => ({ id: f.id, name: f.name, alias: f.alias, path: f.path }))} agentTypes={[]} onSubmit={saveRule} onCancel={() => setEditingRule(null)} /></div>
+  const openNewRule = (automationType: EventRuleAutomationType) => {
+    setNewAutomationType(automationType)
+    setEditingRule("new")
+  }
+  if (editingRule)
+    return (
+      <div className="h-full overflow-auto">
+        <EventRuleEditor
+          rule={editingRule === "new" ? null : editingRule}
+          initialScope={editingRule === "new" ? initialScope : undefined}
+          initialAutomationType={
+            editingRule === "new" ? newAutomationType : undefined
+          }
+          conversations={conversations}
+          folders={folders.map((f) => ({
+            id: f.id,
+            name: f.name,
+            alias: f.alias,
+            path: f.path,
+          }))}
+          agentTypes={[]}
+          onSubmit={saveRule}
+          onCancel={() => setEditingRule(null)}
+        />
+      </div>
+    )
   if (editingWake) return <WakeEditor wake={editingWake === "new" ? null : editingWake} defaultTargetConversationId={conversationId} conversations={conversations} onSubmit={saveWake} onCancel={() => setEditingWake(null)} />
 
   return <div className="flex h-full min-h-0 flex-col gap-4" data-testid="automation-registry-panel">
@@ -127,7 +157,7 @@ export function AutomationRegistryPanel({
     <div className="flex flex-wrap items-center gap-2">
       <div className="relative min-w-0 flex-1"><Search className="absolute left-2 top-2.5 size-4 text-muted-foreground" /><Input className="pl-8" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("registrySearchPlaceholder")} aria-label={t("registrySearchPlaceholder")} /></div>
       <Select value={sort} onValueChange={(value) => setSort(value as SortKey)}><SelectTrigger className="w-36"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="active">{t("sortActive")}</SelectItem><SelectItem value="applicable">{t("sortApplicable")}</SelectItem><SelectItem value="priority">{t("sortPriority")}</SelectItem><SelectItem value="id">{t("sortId")}</SelectItem></SelectContent></Select>
-      {dialog ? <div className="relative"><Button size="sm" onClick={() => setAddMenuOpen((open) => !open)}><Plus className="size-4" />{t("registryAddCustom")}</Button>{addMenuOpen ? <div className="absolute right-0 top-full z-10 mt-1 grid min-w-48 gap-1 rounded-xl border bg-background p-1 shadow-lg"><Button variant="ghost" className="justify-start" onClick={() => { setAddMenuOpen(false); setEditingRule("new") }}>{t("editor.contentDetection")}</Button><Button variant="ghost" className="justify-start" onClick={() => { setAddMenuOpen(false); setEditingRule("new") }}>{t("editor.forwardAfterCompletion")}</Button><Button variant="ghost" className="justify-start" onClick={() => { setAddMenuOpen(false); setEditingWake("new") }}>{t("newWake")}</Button></div> : null}</div> : <><Button size="sm" onClick={() => setEditingRule("new")}><Plus className="size-4" />{t("newRule")}</Button><Button size="sm" variant="outline" onClick={() => setEditingWake("new")}><Plus className="size-4" />{t("newWake")}</Button></>}
+      {dialog ? <div className="relative"><Button size="sm" onClick={() => setAddMenuOpen((open) => !open)}><Plus className="size-4" />{t("registryAddCustom")}</Button>{addMenuOpen ? <div className="absolute right-0 top-full z-10 mt-1 grid min-w-48 gap-1 rounded-xl border bg-background p-1 shadow-lg"><Button variant="ghost" className="justify-start" onClick={() => { setAddMenuOpen(false); openNewRule("content_detection") }}>{t("editor.contentDetection")}</Button><Button variant="ghost" className="justify-start" onClick={() => { setAddMenuOpen(false); openNewRule("forward_after_task_completion") }}>{t("editor.forwardAfterCompletion")}</Button><Button variant="ghost" className="justify-start" onClick={() => { setAddMenuOpen(false); setEditingWake("new") }}>{t("newWake")}</Button></div> : null}</div> : <><Button size="sm" onClick={() => openNewRule("content_detection")}><Plus className="size-4" />{t("newRule")}</Button><Button size="sm" variant="outline" onClick={() => setEditingWake("new")}><Plus className="size-4" />{t("newWake")}</Button></>}
     </div>
     {error ? <p role="alert" className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
      <ul className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">{visible.length ? visible.map((item) => <RegistryRow key={`${isEventRule(item) ? "event" : "wake"}-${item.id}`} item={item} conversations={conversations} conversationId={conversationId} folderId={folderId} agentType={agentType} onReload={load} onEdit={() => isEventRule(item) ? setEditingRule(item) : setEditingWake(item)} onViewLogs={isEventRule(item) ? () => void loadLogs(item.id) : undefined} />) : <li className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">{t("registryEmpty")}</li>}</ul>

@@ -113,6 +113,36 @@ describe("EventRuleEditor", () => {
     expect(draft.enabled).toBe(false)
     expect(draft.config.guard).toEqual({ max_attempts: 3, cooldown_ms: 5000 })
     expect(draft.config.condition.text_contains).toContain("TLS")
+    expect(draft.config.automation_type).toBe("content_detection")
+    expect(draft.config.trigger).toBe("content_matched")
+  })
+
+  it("honors initialAutomationType for completion forwarding drafts", () => {
+    const draft = newEventRuleDraft(undefined, {
+      automationType: "forward_after_task_completion",
+    })
+    expect(draft.config.automation_type).toBe("forward_after_task_completion")
+    expect(draft.config.trigger).toBe("turn_completed")
+  })
+
+  it("opens with completion forwarding selected when requested", () => {
+    render(
+      withIntl(
+        <EventRuleEditor
+          initialAutomationType="forward_after_task_completion"
+          conversations={CONVERSATIONS}
+          onSubmit={vi.fn()}
+        />
+      )
+    )
+
+    expect(
+      screen.getByRole("button", { name: "Forward after task completion" })
+    ).toHaveAttribute("data-variant", "default")
+    expect(screen.getByRole("button", { name: "Content detection" })).toHaveAttribute(
+      "data-variant",
+      "outline"
+    )
   })
 
   it("renders structured backend validation errors instead of object text", async () => {
