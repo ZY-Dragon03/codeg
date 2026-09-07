@@ -1661,7 +1661,8 @@ export interface WakeRecord {
   cancelled_at?: string | null
 }
 export interface WakeDraft {
-  name: string
+  name?: string | null
+  display_name?: string | null
   schedule: WakeSchedule
   prompt?: string | null
   target_conversation_id?: number | null
@@ -4346,6 +4347,11 @@ export interface GitLogFileChange {
 export interface TerminalInfo {
   id: string
   title: string
+  working_dir?: string | null
+  initial_command?: string | null
+  shell?: string | null
+  owner_window_label?: string | null
+  created_at?: string | null
 }
 
 export interface TerminalEvent {

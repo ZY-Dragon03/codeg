@@ -15,6 +15,7 @@ pub struct Model {
     pub trigger_kind: String,
     pub fire_at: Option<DateTimeUtc>,
     pub prompt: String,
+    pub display_name: Option<String>,
     pub status: String,
     pub claimed_at: Option<DateTimeUtc>,
     pub consumed_at: Option<DateTimeUtc>,

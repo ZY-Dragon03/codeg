@@ -26,6 +26,7 @@ pub struct CreateWake {
     pub trigger_kind: String,
     pub fire_at: Option<DateTime<Utc>>,
     pub prompt: String,
+    pub display_name: Option<String>,
     pub creator_kind: String,
     pub creator_id: Option<String>,
 }
@@ -58,6 +59,7 @@ pub async fn create(
         trigger_kind: Set(input.trigger_kind),
         fire_at: Set(input.fire_at),
         prompt: Set(input.prompt.trim().to_owned()),
+        display_name: Set(normalize_display_name(input.display_name)),
         status: Set(STATUS_PENDING.to_owned()),
         claimed_at: Set(None),
         consumed_at: Set(None),
@@ -69,6 +71,12 @@ pub async fn create(
     .insert(db)
     .await?;
     Ok(model)
+}
+
+fn normalize_display_name(value: Option<String>) -> Option<String> {
+    value
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())
 }
 
 fn normalize_creator_kind(value: &str) -> Result<String, DbError> {
@@ -148,6 +156,7 @@ pub async fn update(
     active.trigger_kind = Set(input.trigger_kind);
     active.fire_at = Set(input.fire_at);
     active.prompt = Set(input.prompt.trim().to_owned());
+    active.display_name = Set(normalize_display_name(input.display_name));
     active.status = Set(STATUS_PENDING.to_owned());
     active.claimed_at = Set(None);
     active.consumed_at = Set(None);
@@ -316,6 +325,7 @@ mod tests {
             trigger_kind: TRIGGER_AT.into(),
             fire_at: Some(Utc::now() + chrono::Duration::hours(1)),
             prompt: "later".into(),
+            display_name: None,
             creator_kind: "user".into(),
             creator_id: None,
         }).await.unwrap();

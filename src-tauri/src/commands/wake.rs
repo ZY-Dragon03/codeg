@@ -16,6 +16,8 @@ pub struct WakeDraft {
     pub trigger_kind: String,
     pub fire_at: Option<DateTime<Utc>>,
     pub prompt: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
     #[serde(default = "default_creator_kind")]
     pub creator_kind: String,
     pub creator_id: Option<String>,
@@ -46,6 +48,7 @@ pub async fn wake_create_core(
             trigger_kind: draft.trigger_kind,
             fire_at: draft.fire_at,
             prompt: draft.prompt,
+            display_name: draft.display_name,
             creator_kind: draft.creator_kind,
             creator_id: draft.creator_id,
         },
@@ -79,6 +82,7 @@ pub async fn wake_update_core(
             trigger_kind: draft.trigger_kind,
             fire_at: draft.fire_at,
             prompt: draft.prompt,
+            display_name: draft.display_name,
             creator_kind: draft.creator_kind,
             creator_id: draft.creator_id,
         },

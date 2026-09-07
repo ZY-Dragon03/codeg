@@ -149,3 +149,22 @@ All Event Automation user-facing strings MUST use next-intl and the ten existing
 
 - **WHEN** the product receives the event or request described by this requirement
 - **THEN** the system MUST apply the requirement and expose its result in the response or structured log
+
+### Requirement: Wake creation UI MUST be productized for humans
+
+The Wake editor MUST treat the display name as optional and auto-name empty user wakes as `唤醒_<id>`. Delay triggers MUST use an explicit numeric value plus unit (seconds, minutes, hours) with no silent fallback for empty or zero values. Scheduled-time triggers MUST show the client timezone and interpret `datetime-local` in that timezone. Process-exit triggers MUST select from running terminals via searchable metadata and MUST NOT require manual terminal/process ID entry in the primary UI. The wake prompt MUST use a textarea; the target conversation MUST default to the current conversation and show conversation titles instead of raw ids.
+
+#### Scenario: User leaves wake name blank
+
+- **WHEN** a user saves a wake without entering a display name
+- **THEN** the registry MUST show a stable auto name `唤醒_<id>` while Agent-created wakes with explicit names remain unchanged
+
+#### Scenario: User schedules a local time
+
+- **WHEN** a user enters `2026-09-08 09:30` in their local timezone
+- **THEN** the saved wake MUST fire at that local instant and reopening the editor MUST display the same local time with the current client timezone label
+
+#### Scenario: No running programs
+
+- **WHEN** no eligible running terminal exists for process-exit wake creation
+- **THEN** the UI MUST show an empty-state message instead of a free-text process ID field

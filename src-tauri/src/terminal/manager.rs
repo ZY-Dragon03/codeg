@@ -5,6 +5,8 @@ use std::sync::{Arc, Mutex};
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 
+use chrono::Utc;
+
 use super::error::TerminalError;
 #[cfg(target_os = "windows")]
 use super::shell_flavor::ShellFamily;
@@ -17,6 +19,10 @@ struct TerminalInstance {
     _child: Box<dyn portable_pty::Child + Send>,
     title: String,
     owner_window_label: String,
+    working_dir: String,
+    initial_command: Option<String>,
+    shell: String,
+    created_at: chrono::DateTime<Utc>,
     /// Temp files (credential store + helper script) to clean up on exit.
     temp_files: Vec<std::path::PathBuf>,
 }
@@ -307,6 +313,10 @@ impl TerminalManager {
             _child: child,
             title: "Terminal".to_string(),
             owner_window_label: opts.owner_window_label,
+            working_dir: opts.working_dir,
+            initial_command: opts.initial_command,
+            shell,
+            created_at: Utc::now(),
             temp_files: opts.temp_files,
         };
 
@@ -415,6 +425,11 @@ impl TerminalManager {
             .map(|(id, inst)| TerminalInfo {
                 id: id.clone(),
                 title: inst.title.clone(),
+                working_dir: Some(inst.working_dir.clone()),
+                initial_command: inst.initial_command.clone(),
+                shell: Some(inst.shell.clone()),
+                owner_window_label: Some(inst.owner_window_label.clone()),
+                created_at: Some(inst.created_at.to_rfc3339()),
             })
             .collect();
 

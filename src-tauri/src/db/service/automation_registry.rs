@@ -45,7 +45,7 @@ pub struct AutomationRegistryItem {
 pub enum WakeSchedule {
     After { delay_ms: i64 },
     At { at: DateTime<Utc> },
-    ProcessExit { process_id: Option<i32> },
+    ProcessExit { process_id: Option<String> },
 }
 
 pub async fn list(db: &DatabaseConnection) -> Result<Vec<AutomationRegistryItem>, DbError> {
@@ -116,8 +116,27 @@ fn wake_schedule(row: &agent_wake::Model) -> WakeSchedule {
         crate::db::service::agent_wake_service::TRIGGER_AT => WakeSchedule::At {
             at: row.fire_at.unwrap_or(row.created_at),
         },
-        _ => WakeSchedule::ProcessExit { process_id: None },
+        _ => WakeSchedule::ProcessExit {
+            process_id: row
+                .terminal_id
+                .clone()
+                .or_else(|| row.process_ref.clone()),
+        },
     }
+}
+
+fn wake_display_name(row: &agent_wake::Model) -> String {
+    if let Some(name) = row
+        .display_name
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return name.clone();
+    }
+    if row.creator_kind == "agent" {
+        return row.prompt.clone();
+    }
+    format!("唤醒_{}", row.id)
 }
 
 fn wake_item(row: agent_wake::Model) -> AutomationRegistryItem {
@@ -126,7 +145,7 @@ fn wake_item(row: agent_wake::Model) -> AutomationRegistryItem {
         id: row.id,
         item_type: "wake".into(),
         kind: "wake".into(),
-        name: row.prompt.clone(),
+        name: wake_display_name(&row),
         status: row.status.clone(),
         enabled: row.status == crate::db::service::agent_wake_service::STATUS_PENDING
             || row.status == crate::db::service::agent_wake_service::STATUS_DISPATCHING,
@@ -172,6 +191,7 @@ mod tests {
                 trigger_kind: TRIGGER_AT.into(),
                 fire_at: Some(Utc::now() + chrono::Duration::seconds(20)),
                 prompt: "wake me".into(),
+                display_name: None,
                 creator_kind: "agent".into(),
                 creator_id: Some("conn-1".into()),
             },

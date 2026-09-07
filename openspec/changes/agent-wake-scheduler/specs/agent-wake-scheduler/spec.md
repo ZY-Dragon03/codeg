@@ -77,3 +77,12 @@ All wake sends MUST use the shared existing-target resolver/executor and structu
 
 - **WHEN** the product receives the event or request described by this requirement
 - **THEN** the system MUST apply the requirement and expose its result in the response or structured log
+
+### Requirement: User Wake UI MUST hide internal terminal identity
+
+The human Wake editor MUST select running programs from terminal metadata and MUST NOT expose terminal/process IDs as the primary input. Agent MCP tools (`wake_after`, `wake_at`, `wake_on_process_exit`) MUST continue accepting stable `terminal_id` directly.
+
+#### Scenario: User waits for a running program
+
+- **WHEN** a user creates a process-exit wake from the UI
+- **THEN** the saved row MUST store the stable terminal id while the registry and editor show command/title metadata instead of requiring manual ID entry

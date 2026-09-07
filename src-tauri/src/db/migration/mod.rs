@@ -49,6 +49,7 @@ mod m20260905_000001_event_rule_log_structured;
 mod m20260906_000001_agent_wakes;
 mod m20260906_000002_automation_provenance;
 mod m20260906_000003_event_rule_provenance;
+mod m20260908_000001_agent_wake_display_name;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -104,6 +105,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260906_000001_agent_wakes::Migration),
             Box::new(m20260906_000002_automation_provenance::Migration),
             Box::new(m20260906_000003_event_rule_provenance::Migration),
+            Box::new(m20260908_000001_agent_wake_display_name::Migration),
         ]
     }
 }

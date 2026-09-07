@@ -458,6 +458,7 @@ impl EventAutomationAccess for ConnectionEventAutomationAccess {
             trigger_kind: req.trigger_kind,
             fire_at,
             prompt: req.prompt,
+            display_name: None,
             creator_kind: "agent".into(),
             creator_id: Some(entry.parent_connection_id.clone()),
         };

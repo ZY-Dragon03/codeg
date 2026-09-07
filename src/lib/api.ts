@@ -3582,8 +3582,14 @@ type WakeBackendDraft = {
   triggerKind: "timer_after" | "timer_at" | "process_exit"
   fireAt: string | null
   prompt: string
+  displayName: string | null
   creatorKind: "user"
   creatorId: string | null
+}
+
+function normalizeWakeDisplayName(draft: WakeDraft): string | null {
+  const explicit = draft.display_name?.trim() || draft.name?.trim() || ""
+  return explicit.length > 0 ? explicit : null
 }
 
 function toWakeBackendDraft(
@@ -3595,6 +3601,7 @@ function toWakeBackendDraft(
     throw new Error("A target conversation is required for a wake")
   }
   const schedule = draft.schedule
+  const displayName = normalizeWakeDisplayName(draft)
   if (schedule.kind === "after") {
     return {
       sourceConversationId: source,
@@ -3602,8 +3609,9 @@ function toWakeBackendDraft(
       terminalId: null,
       processRef: null,
       triggerKind: "timer_after",
-      fireAt: new Date(Date.now() + Math.max(1, schedule.delay_ms)).toISOString(),
+      fireAt: new Date(Date.now() + schedule.delay_ms).toISOString(),
       prompt: draft.prompt?.trim() ?? "",
+      displayName,
       creatorKind: "user",
       creatorId: null,
     }
@@ -3617,6 +3625,7 @@ function toWakeBackendDraft(
       triggerKind: "timer_at",
       fireAt: new Date(schedule.at).toISOString(),
       prompt: draft.prompt?.trim() ?? "",
+      displayName,
       creatorKind: "user",
       creatorId: null,
     }
@@ -3629,6 +3638,7 @@ function toWakeBackendDraft(
     triggerKind: "process_exit",
     fireAt: null,
     prompt: draft.prompt?.trim() ?? "",
+    displayName,
     creatorKind: "user",
     creatorId: null,
   }
