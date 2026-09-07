@@ -55,4 +55,35 @@ describe("automationRegistryList compatibility", () => {
     })
     expect(wake.schedule).toEqual({ kind: "after", delay_ms: 5000 })
   })
+
+  it("keeps wake discriminant when registry rows include config null", async () => {
+    mocks.call.mockImplementation(async (method: string) => {
+      if (method === "automation_registry_list") {
+        return [
+          {
+            id: 3,
+            type: "wake",
+            name: "唤醒_3",
+            enabled: true,
+            status: "pending",
+            config: null,
+            trigger_kind: "timer_at",
+            fire_at: "2026-09-08T12:00:00.000Z",
+            schedule: { kind: "at", at: "2026-09-08T12:00:00.000Z" },
+            target_conversation_id: 9,
+          },
+        ]
+      }
+      throw new Error(`unexpected method ${method}`)
+    })
+
+    const [wake] = await automationRegistryList()
+
+    expect(wake).toMatchObject({
+      id: 3,
+      type: "wake",
+      status: "pending",
+      target_conversation_id: 9,
+    })
+  })
 })

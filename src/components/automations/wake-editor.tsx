@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { X } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { terminalList } from "@/lib/api"
 import type {
@@ -24,6 +23,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { WakeProcessSelector } from "./wake-process-selector"
+import { AutomationSubpageHeader } from "./automation-subpage-header"
 import {
   delayToMs,
   formatClientTimezone,
@@ -90,12 +90,14 @@ export function WakeEditor({
   wake,
   defaultTargetConversationId,
   conversations,
+  subpageTitle,
   onSubmit,
   onCancel,
 }: {
   wake: WakeRecord | null
   defaultTargetConversationId: number | null
   conversations: DbConversationSummary[]
+  subpageTitle: string
   onSubmit: (draft: WakeDraft) => Promise<void>
   onCancel: () => void
 }) {
@@ -211,14 +213,7 @@ export function WakeEditor({
 
   return (
     <div className="mx-auto flex max-w-xl flex-col gap-4 p-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">
-          {wake ? t("wakeEditTitle") : t("wakeEditorTitle")}
-        </h3>
-        <Button size="icon-sm" variant="ghost" onClick={onCancel}>
-          <X className="size-4" />
-        </Button>
-      </div>
+      <AutomationSubpageHeader title={subpageTitle} onBack={onCancel} />
 
       <div className="space-y-2">
         <Label htmlFor="wake-name">{t("wakeNameLabel")}</Label>
@@ -352,7 +347,7 @@ export function WakeEditor({
         <Button variant="outline" onClick={onCancel} disabled={submitting}>
           {t("editor.cancel")}
         </Button>
-        <Button onClick={() => void submit()} disabled={submitting || Boolean(validationKey)}>
+        <Button onClick={() => void submit()} disabled={submitting}>
           {t("editor.save")}
         </Button>
       </div>

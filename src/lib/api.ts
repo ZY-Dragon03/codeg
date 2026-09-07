@@ -29,6 +29,7 @@ import type {
   EventRuleLogPage,
   EventRulePreview,
   EventRulePreviewSample,
+  AutomationRegistryEventRule,
   AutomationRegistryItem,
   WakeDraft,
   WakeRecord,
@@ -3546,6 +3547,38 @@ function normalizeLegacyWake(wake: WakeRecord | LegacyWakeRecord): WakeRecord {
 
 /** Unified registry projection. Older servers may not expose this method; the
  * adapter falls back to EventRules so the page remains usable during rollout. */
+function normalizeRegistryItem(
+  item: AutomationRegistryItem
+): AutomationRegistryItem {
+  if (item.type === "wake") {
+    return {
+      ...normalizeLegacyWake(item as WakeRecord & LegacyWakeRecord),
+      type: "wake",
+    }
+  }
+  if (item.type === "event_rule") {
+    return { ...(item as AutomationRegistryEventRule), type: "event_rule" }
+  }
+
+  const legacy = item as AutomationRegistryItem & {
+    kind?: string
+    trigger_kind?: string | null
+    config?: AutomationRegistryEventRule["config"] | null
+    schedule?: WakeRecord["schedule"] | null
+  }
+  if (
+    legacy.kind === "wake" ||
+    legacy.trigger_kind ||
+    (legacy.schedule && !legacy.config?.scope)
+  ) {
+    return {
+      ...normalizeLegacyWake(item as WakeRecord & LegacyWakeRecord),
+      type: "wake",
+    }
+  }
+  return { ...(item as AutomationRegistryEventRule), type: "event_rule" }
+}
+
 export async function automationRegistryList(): Promise<AutomationRegistryItem[]> {
   let items: AutomationRegistryItem[] | null = null
   try {
@@ -3563,12 +3596,15 @@ export async function automationRegistryList(): Promise<AutomationRegistryItem[]
     type: "event_rule" as const,
     provenance: rule.builtin_key ? "builtin" : "user",
   }))
-  const normalizedRules = rules.map((item) => item.type === "wake"
-    ? { ...normalizeLegacyWake(item as WakeRecord & LegacyWakeRecord), type: "wake" as const }
-    : item)
+  const normalizedRules = rules.map((item) => normalizeRegistryItem(item))
   if (normalizedRules.some((item) => item.type === "wake")) return normalizedRules
   try {
-    return [...normalizedRules, ...(await wakeList()).map((wake) => ({ ...normalizeLegacyWake(wake), type: "wake" as const }))]
+    return [
+      ...normalizedRules,
+      ...(await wakeList()).map((wake) =>
+        normalizeRegistryItem({ ...normalizeLegacyWake(wake), type: "wake" })
+      ),
+    ]
   } catch {
     return normalizedRules
   }

@@ -381,7 +381,7 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
       >
         <DialogContent className="max-w-5xl">
           <DialogHeader>
-            <DialogTitle>{tEvent("header.dialogTitle")}</DialogTitle>
+            <DialogTitle>{tEvent("registryTitle")}</DialogTitle>
           </DialogHeader>
           <AutomationRegistryPanel
             conversationId={conversationId}

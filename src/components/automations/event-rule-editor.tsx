@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { AutomationSubpageHeader } from "./automation-subpage-header"
 
 export type EventRuleAutomationType =
   | "content_detection"
@@ -138,6 +139,7 @@ export function EventRuleEditor({
   rule,
   initialScope,
   initialAutomationType,
+  subpageTitle,
   conversations,
   folders = [],
   agentTypes = ALL_AGENT_TYPES,
@@ -147,6 +149,7 @@ export function EventRuleEditor({
   rule?: EventRule | null
   initialScope?: EventRuleScope
   initialAutomationType?: EventRuleAutomationType
+  subpageTitle?: string
   conversations: DbConversationSummary[]
   folders?: readonly FolderSelectOption[]
   agentTypes?: readonly AgentType[]
@@ -272,13 +275,30 @@ export function EventRuleEditor({
 
   return (
     <div className="flex flex-col gap-5" data-testid="event-rule-editor">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">{t("editor.title")}</h2>
-          <p className="text-sm text-muted-foreground">
-            {t("editor.description")}
-          </p>
+      {subpageTitle && onCancel ? (
+        <AutomationSubpageHeader title={subpageTitle} onBack={onCancel} />
+      ) : (
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">{t("editor.title")}</h2>
+            <p className="text-sm text-muted-foreground">
+              {t("editor.description")}
+            </p>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            {draft.enabled ? t("editor.enabled") : t("editor.disabled")}
+            <Switch
+              checked={draft.enabled}
+              onCheckedChange={(enabled) => update((d) => ({ ...d, enabled }))}
+              aria-label={
+                draft.enabled ? t("editor.enabled") : t("editor.disabled")
+              }
+            />
+          </label>
         </div>
+      )}
+
+      {subpageTitle && onCancel ? (
         <label className="flex items-center gap-2 text-sm">
           {draft.enabled ? t("editor.enabled") : t("editor.disabled")}
           <Switch
@@ -289,7 +309,7 @@ export function EventRuleEditor({
             }
           />
         </label>
-      </div>
+      ) : null}
 
       {error ? (
         <p

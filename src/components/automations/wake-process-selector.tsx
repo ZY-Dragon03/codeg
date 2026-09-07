@@ -38,7 +38,7 @@ import {
   terminalSearchText,
 } from "./wake-editor-utils"
 
-function resolveConversationTitle(
+function resolveMaybeConversationTitle(
   terminal: TerminalInfo,
   conversations: DbConversationSummary[],
   folderPaths: Map<number, string>
@@ -46,7 +46,10 @@ function resolveConversationTitle(
   const cwd = terminal.working_dir?.replace(/\\/g, "/").toLowerCase()
   if (!cwd) return null
   for (const conversation of conversations) {
-    const folderPath = folderPaths.get(conversation.folder_id)?.replace(/\\/g, "/").toLowerCase()
+    const folderPath = folderPaths
+      .get(conversation.folder_id)
+      ?.replace(/\\/g, "/")
+      .toLowerCase()
     if (!folderPath) continue
     if (cwd === folderPath || cwd.startsWith(`${folderPath}/`)) {
       return conversation.title || `#${conversation.id}`
@@ -97,14 +100,14 @@ export function WakeProcessSelector({
 
   const visible = useMemo(() => {
     return sorted.filter((terminal) => {
-      const conversationTitle = resolveConversationTitle(
+      const maybeConversation = resolveMaybeConversationTitle(
         terminal,
         conversations,
         folderPaths
       )
       return (
         matchesProcessKindFilter(terminal, kindFilter) &&
-        matchesTerminalSearch(terminal, search, conversationTitle)
+        matchesTerminalSearch(terminal, search, maybeConversation)
       )
     })
   }, [sorted, kindFilter, search, conversations, folderPaths])
@@ -113,15 +116,20 @@ export function WakeProcessSelector({
 
   if (!terminals.length) {
     return (
-      <p className="rounded-xl border border-dashed px-3 py-2 text-sm text-muted-foreground">
-        {t("wakeProcessEmpty")}
-      </p>
+      <div className="space-y-2">
+        <Label>{t("wakeProcessWaitLabel")}</Label>
+        <p className="rounded-xl border border-dashed px-3 py-2 text-sm text-muted-foreground">
+          {t("wakeProcessEmpty")}
+        </p>
+        <p className="text-xs text-muted-foreground">{t("wakeProcessHelp")}</p>
+      </div>
     )
   }
 
   return (
     <div className="space-y-2">
       <Label>{t("wakeProcessWaitLabel")}</Label>
+      <p className="text-xs text-muted-foreground">{t("wakeProcessHelp")}</p>
       <div className="flex flex-wrap gap-2">
         <Select
           value={kindFilter}
@@ -169,7 +177,7 @@ export function WakeProcessSelector({
                 <CommandEmpty>{t("wakeProcessEmpty")}</CommandEmpty>
                 <CommandGroup>
                   {visible.map((terminal) => {
-                    const conversationTitle = resolveConversationTitle(
+                    const maybeConversation = resolveMaybeConversationTitle(
                       terminal,
                       conversations,
                       folderPaths
@@ -190,7 +198,6 @@ export function WakeProcessSelector({
                           </span>
                           <span className="text-xs text-muted-foreground">
                             {processKindLabel(terminal, t)} · {t("wakeProcessRunning")}
-                            {conversationTitle ? ` · ${conversationTitle}` : ""}
                           </span>
                           {terminal.working_dir ? (
                             <span
@@ -200,14 +207,18 @@ export function WakeProcessSelector({
                               {terminal.working_dir}
                             </span>
                           ) : null}
+                          {maybeConversation ? (
+                            <span className="text-xs text-muted-foreground">
+                              {t("wakeProcessMaybeConversation", {
+                                title: maybeConversation,
+                              })}
+                            </span>
+                          ) : null}
                           {startedAt ? (
                             <span className="text-xs text-muted-foreground">
                               {t("wakeProcessStartedAt", { time: startedAt })}
                             </span>
                           ) : null}
-                          <span className="text-[10px] text-muted-foreground/70">
-                            {terminal.id}
-                          </span>
                         </div>
                         <Check
                           className={cn(
