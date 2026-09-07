@@ -5755,7 +5755,7 @@
     },
     "wakeEditTitle": "Wake を編集",
     "wakeNameLabel": "名前（任意）",
-    "wakeNameOptionalHint": "空欄の場合は 唤醒_<id> と自動命名されます。",
+    "wakeNameOptionalHint": "空欄の場合は 唤醒_1、唤醒_2 … と自動命名されます。",
     "wakeTriggerLabel": "トリガー",
     "wakeDelayUnitSeconds": "秒",
     "wakeDelayUnitMinutes": "分",

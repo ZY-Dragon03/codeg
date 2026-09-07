@@ -5755,7 +5755,7 @@
     },
     "wakeEditTitle": "تعديل Wake",
     "wakeNameLabel": "الاسم (اختياري)",
-    "wakeNameOptionalHint": "اتركه فارغًا للتسمية التلقائية 唤醒_<id>.",
+    "wakeNameOptionalHint": "اتركه فارغًا للتسمية التلقائية مثل 唤醒_1 و唤醒_2 …",
     "wakeTriggerLabel": "المشغّل",
     "wakeDelayUnitSeconds": "ثوانٍ",
     "wakeDelayUnitMinutes": "دقائق",

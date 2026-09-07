@@ -5755,7 +5755,7 @@
     },
     "wakeEditTitle": "Wake 편집",
     "wakeNameLabel": "이름(선택)",
-    "wakeNameOptionalHint": "비우면 唤醒_<id>로 자동 이름이 지정됩니다.",
+    "wakeNameOptionalHint": "비우면 唤醒_1, 唤醒_2 …처럼 자동 이름이 지정됩니다.",
     "wakeTriggerLabel": "트리거",
     "wakeDelayUnitSeconds": "초",
     "wakeDelayUnitMinutes": "분",

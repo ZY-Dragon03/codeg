@@ -5755,7 +5755,7 @@
     },
     "wakeEditTitle": "編輯 Wake",
     "wakeNameLabel": "名稱（選填）",
-    "wakeNameOptionalHint": "留空將自動命名為 唤醒_<id>。",
+    "wakeNameOptionalHint": "留空將自動命名為 唤醒_1、唤醒_2、…",
     "wakeTriggerLabel": "觸發方式",
     "wakeDelayUnitSeconds": "秒",
     "wakeDelayUnitMinutes": "分鐘",

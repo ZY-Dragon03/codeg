@@ -5755,7 +5755,7 @@
     },
     "wakeEditTitle": "Modifier le réveil",
     "wakeNameLabel": "Nom (facultatif)",
-    "wakeNameOptionalHint": "Laisser vide pour nommer automatiquement 唤醒_<id>.",
+    "wakeNameOptionalHint": "Laisser vide pour nommer automatiquement 唤醒_1, 唤醒_2, …",
     "wakeTriggerLabel": "Déclencheur",
     "wakeDelayUnitSeconds": "Secondes",
     "wakeDelayUnitMinutes": "Minutes",

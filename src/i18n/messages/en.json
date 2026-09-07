@@ -5606,7 +5606,7 @@
     "wakeEditTitle": "Edit wake",
     "wakeNameLabel": "Name (optional)",
     "wakeNamePlaceholder": "Wake name",
-    "wakeNameOptionalHint": "Leave blank to auto-name as 唤醒_<id>.",
+    "wakeNameOptionalHint": "Leave blank to auto-name as 唤醒_1, 唤醒_2, …",
     "wakeTriggerLabel": "Trigger",
     "wakeAfter": "Delay",
     "wakeAt": "Scheduled time",

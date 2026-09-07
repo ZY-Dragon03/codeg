@@ -5755,7 +5755,7 @@
     },
     "wakeEditTitle": "Editar Wake",
     "wakeNameLabel": "Nombre (opcional)",
-    "wakeNameOptionalHint": "Déjalo vacío para nombrar automáticamente 唤醒_<id>.",
+    "wakeNameOptionalHint": "Déjalo vacío para nombrar automáticamente 唤醒_1, 唤醒_2, …",
     "wakeTriggerLabel": "Disparador",
     "wakeDelayUnitSeconds": "Segundos",
     "wakeDelayUnitMinutes": "Minutos",
