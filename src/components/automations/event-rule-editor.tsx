@@ -34,7 +34,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { AutomationEditorShell } from "./automation-dialog-layout"
 
@@ -54,7 +53,7 @@ export function newEventRuleDraft(
   const automationType = defaults?.automationType ?? "content_detection"
   return {
     name: defaults?.name ?? "Retry failed turn",
-    enabled: false,
+    enabled: true,
     priority: 0,
     config: {
       automation_type: automationType,
@@ -274,18 +273,6 @@ export function EventRuleEditor({
     : t("editor.sourceConversation")
 
   const inSubpage = Boolean(subpageTitle && onCancel)
-  const enabledSwitch = (
-    <label className="flex items-center gap-2 text-sm">
-      {draft.enabled ? t("editor.enabled") : t("editor.disabled")}
-      <Switch
-        checked={draft.enabled}
-        onCheckedChange={(enabled) => update((d) => ({ ...d, enabled }))}
-        aria-label={
-          draft.enabled ? t("editor.enabled") : t("editor.disabled")
-        }
-      />
-    </label>
-  )
 
   return (
     <div className="w-full min-w-0" data-testid="event-rule-editor">
@@ -294,17 +281,13 @@ export function EventRuleEditor({
         subpageTitle={subpageTitle}
         onBack={onCancel}
         standaloneHeader={
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold">{t("editor.title")}</h2>
-              <p className="text-sm text-muted-foreground">
-                {t("editor.description")}
-              </p>
-            </div>
-            {enabledSwitch}
+          <div>
+            <h2 className="text-lg font-semibold">{t("editor.title")}</h2>
+            <p className="text-sm text-muted-foreground">
+              {t("editor.description")}
+            </p>
           </div>
         }
-        subpageToolbar={enabledSwitch}
       >
       {error ? (
         <p

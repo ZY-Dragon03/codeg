@@ -108,9 +108,9 @@ describe("EventRuleEditor", () => {
     expect(screen.getByText("This rule will run.")).toBeInTheDocument()
   })
 
-  it("starts the built-in-like draft disabled with the editable retry defaults", () => {
+  it("starts new automations enabled with the editable retry defaults", () => {
     const draft = newEventRuleDraft()
-    expect(draft.enabled).toBe(false)
+    expect(draft.enabled).toBe(true)
     expect(draft.config.guard).toEqual({ max_attempts: 3, cooldown_ms: 5000 })
     expect(draft.config.condition.text_contains).toContain("TLS")
     expect(draft.config.automation_type).toBe("content_detection")
