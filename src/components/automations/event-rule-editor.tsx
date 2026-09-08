@@ -13,6 +13,7 @@ import type {
   EventRuleDraft,
   EventRulePreview,
   EventRuleScope,
+  EventRuleContentSource,
 } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -25,6 +26,9 @@ import {
   FolderSelect,
   type FolderSelectOption,
 } from "@/components/shared/folder-select"
+import { ConversationSelect } from "@/components/shared/conversation-select"
+import { ConversationMultiSelect } from "@/components/shared/conversation-multi-select"
+import { sortConversationsForAutomationPicker } from "@/lib/conversation-picker-utils"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -51,6 +55,7 @@ export function newEventRuleDraft(
   }
 ): EventRuleDraft {
   const automationType = defaults?.automationType ?? "content_detection"
+  const isForwardAfter = automationType === "forward_after_task_completion"
   return {
     name: defaults?.name ?? "Retry failed turn",
     enabled: true,
@@ -58,20 +63,24 @@ export function newEventRuleDraft(
     config: {
       automation_type: automationType,
       scope,
-      trigger:
-        automationType === "forward_after_task_completion"
-          ? "turn_completed"
-          : "content_matched",
-      condition: {
-        kind: "contains",
-        source: "ai_output",
-        match_mode: "any",
-        text_contains: defaults?.keywords ?? [
-          "RetriableError",
-          "TLS",
-          "connection reset",
-        ],
-      },
+      trigger: isForwardAfter ? "turn_completed" : "content_matched",
+      condition: isForwardAfter
+        ? {
+            kind: "none",
+            source: "ai_output",
+            match_mode: "any",
+            text_contains: [],
+          }
+        : {
+            kind: "contains",
+            source: "ai_output",
+            match_mode: "any",
+            text_contains: defaults?.keywords ?? [
+              "RetriableError",
+              "TLS",
+              "connection reset",
+            ],
+          },
       action: {
         kind: "send_to_conversation",
         conversation_ref: "source_conversation",
@@ -120,18 +129,55 @@ function scopeWithKind(
   }
 }
 
+function conditionForContentSource(
+  source: EventRuleContentSource,
+  previous: EventRuleDraft["config"]["condition"]
+): EventRuleDraft["config"]["condition"] {
+  if (source === "error") {
+    return {
+      kind: "error_kind",
+      source,
+      match_mode: "any",
+      text_contains: [],
+      regex: null,
+      error_kind: previous.error_kind ?? "",
+      error_severity: previous.error_severity ?? "",
+      error_title: previous.error_title ?? "",
+      error_details: previous.error_details ?? "",
+    }
+  }
+  const keywords = (previous.text_contains ?? []).filter((keyword) => keyword.length > 0)
+  return {
+    kind: previous.kind === "regex" ? "regex" : "contains",
+    source,
+    match_mode: previous.match_mode ?? "any",
+    text_contains: keywords.length > 0 ? keywords : [""],
+    regex: previous.regex ?? "",
+    error_kind: previous.error_kind ?? "",
+    error_severity: previous.error_severity ?? "",
+    error_title: previous.error_title ?? "",
+    error_details: previous.error_details ?? "",
+  }
+}
+
 function needsAdvanced(
   rule: EventRule | null | undefined,
-  scope: EventRuleScope
+  scope: EventRuleScope,
+  initialScope?: EventRuleScope
 ) {
   if (!rule) return false
-  return (
-    rule.priority !== 0 ||
-    scope.kind !== "global" ||
-    rule.config.condition.kind !== "contains" ||
-    rule.config.condition.match_mode !== "any" ||
-    rule.config.action.conversation_ref !== "source_conversation"
-  )
+  if (rule.priority !== 0) return true
+  if (scope.kind === "global" || scope.kind === "folder" || scope.kind === "agent_type") {
+    return true
+  }
+  if (
+    initialScope?.kind === "conversation" &&
+    scope.kind === "conversation" &&
+    scope.conversation_id !== initialScope.conversation_id
+  ) {
+    return true
+  }
+  return false
 }
 
 export function EventRuleEditor({
@@ -177,20 +223,17 @@ export function EventRuleEditor({
   const [advancedOpen, setAdvancedOpen] = useState(() =>
     needsAdvanced(
       rule,
-      rule?.config.scope ?? initialScope ?? { kind: "global" }
+      rule?.config.scope ?? initialScope ?? { kind: "global" },
+      initialScope
     )
   )
   const [previewOpen, setPreviewOpen] = useState(false)
-  const [technicalOpen, setTechnicalOpen] = useState(false)
   const scope = draft.config.scope
   const condition = draft.config.condition
   const action = draft.config.action
   const keywords = condition.text_contains ?? []
   const sortedConversations = useMemo(
-    () =>
-      [...conversations].sort((a, b) =>
-        (a.title ?? "").localeCompare(b.title ?? "")
-      ),
+    () => sortConversationsForAutomationPicker(conversations),
     [conversations]
   )
   const folderOptions = useMemo(() => {
@@ -266,13 +309,18 @@ export function EventRuleEditor({
       setError(toErrorMessage(cause))
     }
   }
-  const targetTitle = preview?.resolved_target_id
-    ? conversations.find(
-        (conversation) => conversation.id === preview.resolved_target_id
-      )?.title || t("editor.selectConversation")
-    : t("editor.sourceConversation")
-
   const inSubpage = Boolean(subpageTitle && onCancel)
+  const isForwardAfter =
+    draft.config.automation_type === "forward_after_task_completion"
+  const isContentDetection = !isForwardAfter
+  const contentSource = condition.source ?? "ai_output"
+  const showKeywordMatcher =
+    isContentDetection &&
+    contentSource !== "error" &&
+    (condition.kind === "contains" || condition.kind === "regex")
+  const showErrorMatcher =
+    isContentDetection &&
+    (contentSource === "error" || contentSource === "both")
 
   return (
     <div className="w-full min-w-0" data-testid="event-rule-editor">
@@ -298,14 +346,28 @@ export function EventRuleEditor({
         </p>
       ) : null}
 
+      <div className="grid gap-1.5">
+        <Label htmlFor="event-rule-name-top">{t("editor.name")}</Label>
+        <Input
+          id="event-rule-name-top"
+          placeholder={t("editor.namePlaceholder")}
+          value={draft.name}
+          onChange={(e) => update((d) => ({ ...d, name: e.target.value }))}
+        />
+      </div>
+
+      {isForwardAfter ? (
+        <p className="text-sm text-muted-foreground">
+          {t("editor.whenDescriptionForward")}
+        </p>
+      ) : (
       <fieldset className="grid gap-3 rounded-xl border p-4">
         <legend className="px-1 text-sm font-semibold">
-          {t("editor.when")}
+          {t("editor.whenContentDetection")}
         </legend>
         <p className="text-sm text-muted-foreground">
-          {t("editor.whenDescription")}
+          {t("editor.whenDescriptionContentDetection")}
         </p>
-        {draft.config.automation_type !== "forward_after_task_completion" ? (
           <div className="grid gap-2">
             <Label>{t("editor.contentSource")}</Label>
             <div className="flex flex-wrap gap-2">
@@ -315,11 +377,11 @@ export function EventRuleEditor({
                   key={source}
                   size="sm"
                   variant={
-                    (condition.source ?? "ai_output") === source
-                      ? "default"
-                      : "outline"
+                    contentSource === source ? "default" : "outline"
                   }
-                  onClick={() => setCondition({ ...condition, source })}
+                  onClick={() =>
+                    setCondition(conditionForContentSource(source, condition))
+                  }
                 >
                   {source === "ai_output"
                     ? t("editor.sourceAiOutput")
@@ -330,10 +392,49 @@ export function EventRuleEditor({
               ))}
             </div>
           </div>
-        ) : null}
+        {showKeywordMatcher ? (
         <div className="grid gap-2">
-          <Label>{t("editor.errorContains")}</Label>
-          {condition.kind === "contains" ? (
+          <Label>{t("editor.matchMode")}</Label>
+          <Select
+            value={condition.kind === "regex" ? "regex" : "contains"}
+            onValueChange={(kind) =>
+              setCondition(
+                kind === "regex"
+                  ? {
+                      ...condition,
+                      kind: "regex",
+                      regex: condition.regex ?? "",
+                    }
+                  : {
+                      ...condition,
+                      kind: "contains",
+                      text_contains:
+                        (condition.text_contains ?? []).length > 0
+                          ? condition.text_contains
+                          : [""],
+                    }
+              )
+            }
+          >
+            <SelectTrigger className="w-full max-w-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="contains">
+                {t("editor.keywordMatching")}
+              </SelectItem>
+              <SelectItem value="regex">{t("conditionRegex")}</SelectItem>
+            </SelectContent>
+          </Select>
+          {condition.kind === "regex" ? (
+            <Input
+              aria-label={t("conditionRegex")}
+              value={condition.regex ?? ""}
+              onChange={(e) =>
+                setCondition({ ...condition, regex: e.target.value })
+              }
+            />
+          ) : (
             <>
               <div className="flex items-center gap-2">
                 <Select
@@ -394,26 +495,65 @@ export function EventRuleEditor({
                 <Plus className="size-4" /> {t("editor.addKeyword")}
               </Button>
             </>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              {t(
-                condition.kind === "none"
-                  ? "conditionNone"
-                  : condition.kind === "regex"
-                    ? "conditionRegex"
-                    : "conditionErrorKind"
-              )}
-            </p>
           )}
         </div>
+        ) : null}
+        {showErrorMatcher ? (
+          <div className="grid gap-2">
+            <Label>{t("editor.errorDetection")}</Label>
+            <div className="grid gap-1.5">
+              <Label htmlFor="event-rule-error-kind-main">
+                {t("conditionErrorKind")}
+              </Label>
+              <Input
+                id="event-rule-error-kind-main"
+                value={condition.error_kind ?? ""}
+                onChange={(e) =>
+                  setCondition({ ...condition, error_kind: e.target.value })
+                }
+              />
+              <Label htmlFor="event-rule-error-severity-main">
+                {t("editor.errorSeverity")}
+              </Label>
+              <Input
+                id="event-rule-error-severity-main"
+                value={condition.error_severity ?? ""}
+                onChange={(e) =>
+                  setCondition({ ...condition, error_severity: e.target.value })
+                }
+              />
+              <Label htmlFor="event-rule-error-title-main">
+                {t("editor.errorTitle")}
+              </Label>
+              <Input
+                id="event-rule-error-title-main"
+                value={condition.error_title ?? ""}
+                onChange={(e) =>
+                  setCondition({ ...condition, error_title: e.target.value })
+                }
+              />
+              <Label htmlFor="event-rule-error-details-main">
+                {t("editor.errorDetails")}
+              </Label>
+              <Textarea
+                id="event-rule-error-details-main"
+                value={condition.error_details ?? ""}
+                onChange={(e) =>
+                  setCondition({ ...condition, error_details: e.target.value })
+                }
+              />
+            </div>
+          </div>
+        ) : null}
       </fieldset>
+      )}
 
       <fieldset className="grid gap-3 rounded-xl border p-4">
         <legend className="px-1 text-sm font-semibold">
           {t("editor.then")}
         </legend>
         <p className="text-sm text-muted-foreground">
-          {t("editor.destinationHint")}
+          {t("editor.sendToConversationsHint")}
         </p>
         <div className="grid gap-1.5">
           <Label htmlFor="event-rule-prompt">{t("editor.prompt")}</Label>
@@ -432,9 +572,6 @@ export function EventRuleEditor({
             }
           />
         </div>
-        <p className="text-xs text-muted-foreground">
-          {t("editor.sourceConversation")}
-        </p>
         <div className="grid gap-2 rounded-lg bg-muted/40 p-3">
           <Label>{t("editor.payload")}</Label>
           {(
@@ -605,62 +742,27 @@ export function EventRuleEditor({
           </div>
         </div>
         <div className="grid gap-2">
-          <Label>{t("editor.additionalTargets")}</Label>
+          <Label>{t("editor.sendToConversations")}</Label>
           <p className="text-xs text-muted-foreground">
             {t("editor.additionalTargetsHint")}
           </p>
-          <div className="grid max-h-48 gap-2 overflow-auto rounded-lg border p-2">
-            {sortedConversations.map((conversation) => {
-              const checked = (action.target_conversation_ids ?? []).includes(
-                conversation.id
-              )
-              const metadata = [
-                getAgentLabel(conversation.agent_type),
-                folders.find((folder) => folder.id === conversation.folder_id)
-                  ?.alias,
-              ]
-                .filter(Boolean)
-                .join(" · ")
-              return (
-                <label
-                  className="flex items-start gap-2 text-sm"
-                  key={conversation.id}
-                >
-                  <Checkbox
-                    checked={checked}
-                    onCheckedChange={(next) =>
-                      update((d) => {
-                        const current =
-                          d.config.action.target_conversation_ids ?? []
-                        const ids =
-                          next === true
-                            ? [...new Set([...current, conversation.id])]
-                            : current.filter((id) => id !== conversation.id)
-                        return {
-                          ...d,
-                          config: {
-                            ...d.config,
-                            action: {
-                              ...d.config.action,
-                              target_conversation_ids: ids,
-                            },
-                          },
-                        }
-                      })
-                    }
-                  />
-                  <span>
-                    {conversation.title || t("editor.selectConversation")}
-                    {metadata ? (
-                      <span className="block text-xs text-muted-foreground">
-                        {metadata}
-                      </span>
-                    ) : null}
-                  </span>
-                </label>
-              )
-            })}
-          </div>
+          <ConversationMultiSelect
+            conversations={sortedConversations}
+            folders={folders}
+            value={action.target_conversation_ids ?? []}
+            onChange={(ids) =>
+              update((d) => ({
+                ...d,
+                config: {
+                  ...d.config,
+                  action: {
+                    ...d.config.action,
+                    target_conversation_ids: ids,
+                  },
+                },
+              }))
+            }
+          />
         </div>
       </fieldset>
 
@@ -723,6 +825,7 @@ export function EventRuleEditor({
         </p>
       </fieldset>
 
+      {isContentDetection ? (
       <Collapsible
         open={previewOpen}
         onOpenChange={setPreviewOpen}
@@ -735,10 +838,10 @@ export function EventRuleEditor({
           >
             <span>
               <span className="block text-left font-semibold">
-                {t("editor.test")}
+                {t("editor.testMatch")}
               </span>
               <span className="block text-left text-xs font-normal text-muted-foreground">
-                {t("editor.testDescription")}
+                {t("editor.testMatchDescription")}
               </span>
             </span>
             <ChevronDown
@@ -751,17 +854,17 @@ export function EventRuleEditor({
           </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="grid gap-3 pt-4">
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div className="grid gap-1.5">
-              <Label>{t("editor.sampleConversation")}</Label>
-              <ConversationSelect
-                conversations={sortedConversations}
-                folders={folders}
-                value={sampleConversationId}
-                placeholder={t("editor.selectConversation")}
-                onChange={setSampleConversationId}
-              />
-            </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="event-rule-sample-text">
+              {t("editor.testMatchSample")}
+            </Label>
+            <Textarea
+              id="event-rule-sample-text"
+              value={sampleText}
+              onChange={(e) => setSampleText(e.target.value)}
+            />
+          </div>
+          {contentSource !== "ai_output" ? (
             <div className="grid gap-1.5">
               <Label htmlFor="event-rule-sample-error">
                 {t("editor.sampleErrorKind")}
@@ -772,103 +875,31 @@ export function EventRuleEditor({
                 onChange={(e) => setSampleErrorKind(e.target.value)}
               />
             </div>
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="event-rule-sample-text">
-              {t("editor.failedText")}
-            </Label>
-            <Textarea
-              id="event-rule-sample-text"
-              value={sampleText}
-              onChange={(e) => setSampleText(e.target.value)}
-            />
-          </div>
+          ) : null}
           <Button variant="outline" className="w-fit" onClick={runPreview}>
-            {t("editor.runPreview")}
+            {t("editor.runTestMatch")}
           </Button>
           {preview ? (
-            <div className="grid gap-2 rounded-xl bg-muted p-3 text-sm">
-              <p>
-                {preview.scope_matches
-                  ? t("preview.scopeMatch")
-                  : t("preview.scopeMiss")}
-              </p>
-              <p>
+            <div className="rounded-xl bg-muted p-3 text-sm">
+              <p
+                className={
+                  preview.condition_matches
+                    ? "font-medium text-primary"
+                    : "font-medium text-destructive"
+                }
+              >
                 {preview.condition_matches
-                  ? t("preview.conditionMatch")
-                  : t("preview.conditionMiss")}
+                  ? t("editor.testMatchWillTrigger")
+                  : t("editor.testMatchWillNotTrigger")}
               </p>
-              {preview.draft_is_winner ? (
-                <p className="font-medium">{t("preview.willRun")}</p>
-              ) : null}
-              {preview.draft_is_shadowed ? (
-                <p>
-                  {t("preview.shadowed", {
-                    rule: preview.winner_rule_id ?? "?",
-                  })}
-                </p>
-              ) : null}
-              {!preview.draft_is_winner && !preview.draft_is_shadowed ? (
-                <p>{t("preview.noWinner")}</p>
-              ) : null}
-              {!preview.target_exists ? (
-                <p>{t("preview.targetMissing")}</p>
-              ) : !preview.target_available ? (
-                <p>{t("preview.targetUnavailable", { target: targetTitle })}</p>
-              ) : (
-                <p>{t("preview.targetReady", { target: targetTitle })}</p>
-              )}
-              {preview.draft_is_winner &&
-              preview.target_exists &&
-              preview.target_available ? (
-                <p>
-                  {t("preview.sendPrompt", {
-                    target: targetTitle,
-                    reason: action.prompt,
-                  })}
-                </p>
-              ) : null}
-              {preview.guard_blocked ? (
-                <p>
-                  {t("preview.guardBlocked", { reason: preview.guard_blocked })}
-                </p>
-              ) : null}
-              <Collapsible open={technicalOpen} onOpenChange={setTechnicalOpen}>
-                <CollapsibleTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-fit px-0 text-xs"
-                  >
-                    {t("preview.technical")}{" "}
-                    <ChevronDown
-                      className={
-                        technicalOpen
-                          ? "size-3 rotate-180 transition-transform"
-                          : "size-3 transition-transform"
-                      }
-                    />
-                  </Button>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="grid gap-1 pt-2 text-xs text-muted-foreground">
-                  <span>scope_matches: {String(preview.scope_matches)}</span>
-                  <span>
-                    condition_matches: {String(preview.condition_matches)}
-                  </span>
-                  <span>
-                    resolved_target_id: {String(preview.resolved_target_id)}
-                  </span>
-                  <span>target_exists: {String(preview.target_exists)}</span>
-                  <span>
-                    target_available: {String(preview.target_available)}
-                  </span>
-                  <span>winner_rule_id: {String(preview.winner_rule_id)}</span>
-                </CollapsibleContent>
-              </Collapsible>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {t("editor.testMatchNoSendHint")}
+              </p>
             </div>
           ) : null}
         </CollapsibleContent>
       </Collapsible>
+      ) : null}
 
       <Collapsible
         open={advancedOpen}
@@ -898,40 +929,27 @@ export function EventRuleEditor({
           </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="grid gap-4 pt-4">
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div className="grid gap-1.5">
-              <Label htmlFor="event-rule-name">{t("editor.name")}</Label>
-              <Input
-                id="event-rule-name"
-                placeholder={t("editor.namePlaceholder")}
-                value={draft.name}
-                onChange={(e) =>
-                  update((d) => ({ ...d, name: e.target.value }))
-                }
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="event-rule-priority">
-                {t("editor.priority")}
-              </Label>
-              <Input
-                id="event-rule-priority"
-                type="number"
-                value={draft.priority}
-                onChange={(e) =>
-                  update((d) => ({
-                    ...d,
-                    priority: Number(e.target.value) || 0,
-                  }))
-                }
-              />
-              <p className="text-xs text-muted-foreground">
-                {t("editor.priorityHint")}
-              </p>
-            </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="event-rule-priority">
+              {t("editor.priority")}
+            </Label>
+            <Input
+              id="event-rule-priority"
+              type="number"
+              value={draft.priority}
+              onChange={(e) =>
+                update((d) => ({
+                  ...d,
+                  priority: Number(e.target.value) || 0,
+                }))
+              }
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("editor.priorityHint")}
+            </p>
           </div>
           <div className="grid gap-1.5">
-            <Label>{t("editor.scope")}</Label>
+            <Label>{t("editor.listenInConversations")}</Label>
             <Select
               value={scope.kind}
               onValueChange={(value) =>
@@ -942,16 +960,16 @@ export function EventRuleEditor({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="global">{t("scopeGlobal")}</SelectItem>
                 <SelectItem value="conversation">
-                  {t("scopeConversation")}
+                  {t("editor.listenCurrentConversation")}
                 </SelectItem>
+                <SelectItem value="global">{t("scopeGlobal")}</SelectItem>
                 <SelectItem value="folder">{t("scopeFolder")}</SelectItem>
                 <SelectItem value="agent_type">{t("scopeAgent")}</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              {t("editor.scopeHint")}
+              {t("editor.listenInConversationsHint")}
             </p>
           </div>
           {scope.kind === "conversation" ? (
@@ -1003,179 +1021,6 @@ export function EventRuleEditor({
               </Select>
             </div>
           ) : null}
-          <div className="grid gap-1.5">
-            <Label>{t("editor.errorContains")}</Label>
-            <Select
-              value={condition.kind}
-              onValueChange={(kind) =>
-                setCondition(
-                  kind === "contains"
-                    ? {
-                        kind,
-                        source: condition.source ?? "ai_output",
-                        match_mode: "any",
-                        text_contains: keywords,
-                      }
-                    : kind === "regex"
-                      ? {
-                          kind,
-                          source: condition.source ?? "ai_output",
-                          match_mode: "any",
-                          regex: condition.regex ?? "",
-                        }
-                      : kind === "error_kind"
-                        ? {
-                            kind,
-                            source: "error",
-                            match_mode: "any",
-                            error_kind: condition.error_kind ?? "",
-                            error_severity: condition.error_severity ?? "",
-                            error_title: condition.error_title ?? "",
-                            error_details: condition.error_details ?? "",
-                          }
-                        : {
-                            kind: "none",
-                            source: condition.source ?? "ai_output",
-                            match_mode: "any",
-                          }
-                )
-              }
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">{t("conditionNone")}</SelectItem>
-                <SelectItem value="contains">
-                  {t("conditionContains")}
-                </SelectItem>
-                <SelectItem value="regex">{t("conditionRegex")}</SelectItem>
-                <SelectItem value="error_kind">
-                  {t("conditionErrorKind")}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          {condition.kind === "regex" ? (
-            <div className="grid gap-1.5">
-              <Label htmlFor="event-rule-regex">{t("conditionRegex")}</Label>
-              <Input
-                id="event-rule-regex"
-                value={condition.regex ?? ""}
-                onChange={(e) =>
-                  setCondition({ ...condition, regex: e.target.value })
-                }
-              />
-              <p className="text-xs text-muted-foreground">
-                {t("editor.scopeHint")}
-              </p>
-            </div>
-          ) : null}
-          {condition.kind === "error_kind" ? (
-            <div className="grid gap-1.5">
-              <Label htmlFor="event-rule-error-kind">
-                {t("conditionErrorKind")}
-              </Label>
-              <Input
-                id="event-rule-error-kind"
-                value={condition.error_kind ?? ""}
-                onChange={(e) =>
-                  setCondition({ ...condition, error_kind: e.target.value })
-                }
-              />
-              <p className="text-xs text-muted-foreground">
-                {t("editor.scopeHint")}
-              </p>
-              <Label htmlFor="event-rule-error-severity">
-                {t("editor.errorSeverity")}
-              </Label>
-              <Input
-                id="event-rule-error-severity"
-                value={condition.error_severity ?? ""}
-                onChange={(e) =>
-                  setCondition({ ...condition, error_severity: e.target.value })
-                }
-              />
-              <Label htmlFor="event-rule-error-title">
-                {t("editor.errorTitle")}
-              </Label>
-              <Input
-                id="event-rule-error-title"
-                value={condition.error_title ?? ""}
-                onChange={(e) =>
-                  setCondition({ ...condition, error_title: e.target.value })
-                }
-              />
-              <Label htmlFor="event-rule-error-details">
-                {t("editor.errorDetails")}
-              </Label>
-              <Textarea
-                id="event-rule-error-details"
-                value={condition.error_details ?? ""}
-                onChange={(e) =>
-                  setCondition({ ...condition, error_details: e.target.value })
-                }
-              />
-            </div>
-          ) : null}
-          <div className="grid gap-1.5">
-            <Label>{t("editor.destination")}</Label>
-            <Select
-              value={action.conversation_ref}
-              onValueChange={(conversation_ref) =>
-                update((d) => ({
-                  ...d,
-                  config: {
-                    ...d.config,
-                    action: {
-                      ...d.config.action,
-                      conversation_ref:
-                        conversation_ref as typeof action.conversation_ref,
-                      conversation_id:
-                        conversation_ref === "specific_conversation"
-                          ? (d.config.action.conversation_id ?? 0)
-                          : null,
-                    },
-                  },
-                }))
-              }
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="source_conversation">
-                  {t("editor.sourceConversation")}
-                </SelectItem>
-                <SelectItem value="specific_conversation">
-                  {t("editor.specificConversation")}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              {t("editor.destinationHint")}
-            </p>
-          </div>
-          {action.conversation_ref === "specific_conversation" ? (
-            <div className="grid gap-1.5">
-              <Label>{t("editor.specificConversation")}</Label>
-              <ConversationSelect
-                conversations={sortedConversations}
-                folders={folders}
-                value={action.conversation_id ?? 0}
-                placeholder={t("editor.selectConversation")}
-                onChange={(id) =>
-                  update((d) => ({
-                    ...d,
-                    config: {
-                      ...d.config,
-                      action: { ...d.config.action, conversation_id: id },
-                    },
-                  }))
-                }
-              />
-            </div>
-          ) : null}
         </CollapsibleContent>
       </Collapsible>
 
@@ -1191,52 +1036,5 @@ export function EventRuleEditor({
       </div>
       </AutomationEditorShell>
     </div>
-  )
-}
-
-function ConversationSelect({
-  conversations,
-  folders,
-  value,
-  placeholder,
-  onChange,
-}: {
-  conversations: DbConversationSummary[]
-  folders: readonly FolderSelectOption[]
-  value: number
-  placeholder: string
-  onChange: (id: number) => void
-}) {
-  const folderById = useMemo(
-    () => new Map(folders.map((folder) => [folder.id, folder])),
-    [folders]
-  )
-  return (
-    <Select
-      value={value ? String(value) : ""}
-      onValueChange={(id) => onChange(Number(id))}
-    >
-      <SelectTrigger>
-        <SelectValue placeholder={placeholder} />
-      </SelectTrigger>
-      <SelectContent>
-        {conversations.map((conversation) => {
-          const folder = folderById.get(conversation.folder_id)
-          const title = conversation.title || placeholder
-          const metadata = [
-            getAgentLabel(conversation.agent_type),
-            folder?.alias ?? folder?.name,
-          ]
-            .filter(Boolean)
-            .join(" · ")
-          return (
-            <SelectItem value={String(conversation.id)} key={conversation.id}>
-              {title}
-              {metadata ? " · " + metadata : ""}
-            </SelectItem>
-          )
-        })}
-      </SelectContent>
-    </Select>
   )
 }
