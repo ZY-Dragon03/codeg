@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   isRegistryEventRule,
   isRegistryWake,
+  isWakeActive,
   isWakePending,
   isWakeTerminal,
   resolveRegistryItemKind,
@@ -39,6 +40,33 @@ describe("registry-item-utils", () => {
 
   it("tracks wake lifecycle states", () => {
     expect(
+      isWakeActive({
+        id: 1,
+        name: "x",
+        enabled: true,
+        status: "pending",
+        schedule: { kind: "after", delay_ms: 1000 },
+      })
+    ).toBe(true)
+    expect(
+      isWakeActive({
+        id: 1,
+        name: "x",
+        enabled: true,
+        status: "dispatching",
+        schedule: { kind: "after", delay_ms: 1000 },
+      })
+    ).toBe(true)
+    expect(
+      isWakeActive({
+        id: 1,
+        name: "x",
+        enabled: false,
+        status: "sent",
+        schedule: { kind: "after", delay_ms: 1000 },
+      })
+    ).toBe(false)
+    expect(
       isWakePending({
         id: 1,
         name: "x",
@@ -53,6 +81,15 @@ describe("registry-item-utils", () => {
         name: "x",
         enabled: false,
         status: "cancelled",
+        schedule: { kind: "after", delay_ms: 1000 },
+      })
+    ).toBe(true)
+    expect(
+      isWakeTerminal({
+        id: 1,
+        name: "x",
+        enabled: true,
+        status: "failed",
         schedule: { kind: "after", delay_ms: 1000 },
       })
     ).toBe(true)

@@ -18,6 +18,18 @@ pub struct CancelWake {
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DeleteWake {
+    pub source_conversation_id: i32,
+    pub id: i32,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RearmWake {
+    pub source_conversation_id: i32,
+    pub id: i32,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateWake {
     pub source_conversation_id: i32,
     pub id: i32,
@@ -43,7 +55,7 @@ pub async fn wake_create(
 ) -> Result<Json<serde_json::Value>, AppCommandError> {
     Ok(Json(
         serde_json::to_value(
-            wake::wake_create_core(&state.db, draft)
+            wake::wake_create_core(&state.emitter, &state.db, draft)
                 .await
                 .map_err(AppCommandError::from)?,
         )
@@ -56,9 +68,49 @@ pub async fn wake_cancel(
 ) -> Result<Json<serde_json::Value>, AppCommandError> {
     Ok(Json(
         serde_json::to_value(
-            wake::wake_cancel_core(&state.db, params.source_conversation_id, params.id)
-                .await
-                .map_err(AppCommandError::from)?,
+            wake::wake_cancel_core(
+                &state.emitter,
+                &state.db,
+                params.source_conversation_id,
+                params.id,
+            )
+            .await
+            .map_err(AppCommandError::from)?,
+        )
+        .expect("wake serialize"),
+    ))
+}
+
+pub async fn wake_delete(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<DeleteWake>,
+) -> Result<Json<serde_json::Value>, AppCommandError> {
+    wake::wake_delete_core(
+        &state.emitter,
+        &state.db,
+        params.source_conversation_id,
+        params.id,
+    )
+    .await
+    .map_err(AppCommandError::from)?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+pub async fn wake_rearm(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(params): Json<RearmWake>,
+) -> Result<Json<serde_json::Value>, AppCommandError> {
+    Ok(Json(
+        serde_json::to_value(
+            wake::wake_rearm_core(
+                &state.emitter,
+                &state.db,
+                &state.terminal_manager,
+                params.source_conversation_id,
+                params.id,
+            )
+            .await
+            .map_err(AppCommandError::from)?,
         )
         .expect("wake serialize"),
     ))
@@ -71,6 +123,7 @@ pub async fn wake_update(
     Ok(Json(
         serde_json::to_value(
             wake::wake_update_core(
+                &state.emitter,
                 &state.db,
                 params.source_conversation_id,
                 params.id,

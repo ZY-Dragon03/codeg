@@ -5796,7 +5796,7 @@
       "wakeStatusCancelled": "ملغى",
       "cancelWakeAction": "إلغاء",
       "cancelWakeTitle": "إلغاء Wake؟",
-      "cancelWakeDescription": "سيتوقف “{name}” عن الانتظار ولن يرسل رسالته.",
+      "cancelWakeDescription": "بعد الإلغاء لن يتم تشغيله عند تحقق الشرط.",
       "cancelWakeConfirm": "تأكيد الإلغاء",
       "wakeCancelMissingTarget": "لا توجد محادثة مستهدفة لإلغاء هذا Wake.",
       "deleteEventRuleTitle": "حذف الأتمتة؟",
@@ -5805,7 +5805,16 @@
       "wakeCancelled": "تم إلغاء Wake.",
       "ruleSaved": "تم حفظ الأتمتة.",
       "ruleUpdated": "تم تحديث الأتمتة.",
-      "ruleDeleted": "تم حذف الأتمتة."
+      "ruleDeleted": "تم حذف الأتمتة.",
+      "deleteWakeTitle": "حذف هذا Wake؟",
+      "deleteWakeDescription": "سيحذف هذا السجل نهائيًا.",
+      "wakeSavedAndRearmed": "تم حفظ Wake وإعادة تفعيله.",
+      "wakeSaveAndRearm": "حفظ وإعادة تفعيل",
+      "wakeRearmed": "تمت إعادة تفعيل Wake.",
+      "wakeDeleted": "تم حذف Wake نهائيًا.",
+      "wakeDispatchingHint": "جارٍ التشغيل — يرجى الانتظار.",
+      "wakeRearmPastAtNotice": "انتهى الوقت المحدد الأصلي. اختر وقتًا مستقبليًا جديدًا.",
+      "wakeRearmStaleProcessNotice": "المهمة الأصلية لم تعد قيد التشغيل. اختر مهمة أخرى يتتبعها Codeg."
     },
     "wakeProcessHelp": "يعرض المهام التي بدأت في طرفيات Codeg وما زالت قيد التشغيل في هذا التطبيق.",
     "wakeProcessMaybeConversation": "قد تنتمي إلى: {title}"

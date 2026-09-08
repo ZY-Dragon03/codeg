@@ -95,6 +95,8 @@ export function WakeEditor({
   defaultTargetConversationId,
   conversations,
   subpageTitle,
+  rearmNotice,
+  saveLabel,
   onSubmit,
   onCancel,
 }: {
@@ -102,6 +104,8 @@ export function WakeEditor({
   defaultTargetConversationId: number | null
   conversations: DbConversationSummary[]
   subpageTitle: string
+  rearmNotice?: "past_at" | "stale_process"
+  saveLabel?: string
   onSubmit: (draft: WakeDraft) => Promise<void>
   onCancel: () => void
 }) {
@@ -220,6 +224,13 @@ export function WakeEditor({
       <AutomationSubpageHeader title={subpageTitle} onBack={onCancel} />
 
       <AutomationSubpageForm>
+      {rearmNotice ? (
+        <p className="rounded-xl bg-primary/10 px-3 py-2 text-sm text-primary">
+          {rearmNotice === "past_at"
+            ? t("registry.wakeRearmPastAtNotice")
+            : t("registry.wakeRearmStaleProcessNotice")}
+        </p>
+      ) : null}
       <div className="space-y-2">
         <Label htmlFor="wake-name">{t("wakeNameLabel")}</Label>
         <Input
@@ -354,7 +365,7 @@ export function WakeEditor({
           {t("editor.cancel")}
         </Button>
         <Button onClick={() => void submit()} disabled={submitting}>
-          {t("editor.save")}
+          {saveLabel ?? t("editor.save")}
         </Button>
       </div>
       </AutomationSubpageForm>

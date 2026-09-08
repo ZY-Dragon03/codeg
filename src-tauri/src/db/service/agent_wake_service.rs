@@ -17,6 +17,10 @@ pub const TRIGGER_AFTER: &str = "timer_after";
 pub const TRIGGER_AT: &str = "timer_at";
 pub const TRIGGER_PROCESS_EXIT: &str = "process_exit";
 
+pub const ERR_WAKE_DISPATCHING: &str = "wake_dispatching";
+pub const ERR_WAKE_AT_PAST_REQUIRES_EDIT: &str = "wake_at_past_requires_edit";
+pub const ERR_WAKE_PROCESS_STALE_REQUIRES_EDIT: &str = "wake_process_stale_requires_edit";
+
 #[derive(Debug, Clone)]
 pub struct CreateWake {
     pub source_conversation_id: i32,
@@ -25,6 +29,7 @@ pub struct CreateWake {
     pub process_ref: Option<String>,
     pub trigger_kind: String,
     pub fire_at: Option<DateTime<Utc>>,
+    pub delay_ms: Option<i64>,
     pub prompt: String,
     pub display_name: Option<String>,
     pub creator_kind: String,
@@ -49,6 +54,7 @@ pub async fn create(
         ));
     }
     let now = Utc::now();
+    let delay_ms = resolve_delay_ms(&input.trigger_kind, input.fire_at, input.delay_ms, now);
     let model = agent_wake::ActiveModel {
         source_conversation_id: Set(input.source_conversation_id),
         creator_kind: Set(normalize_creator_kind(&input.creator_kind)?),
@@ -58,6 +64,7 @@ pub async fn create(
         process_ref: Set(input.process_ref),
         trigger_kind: Set(input.trigger_kind),
         fire_at: Set(input.fire_at),
+        delay_ms: Set(delay_ms),
         prompt: Set(input.prompt.trim().to_owned()),
         display_name: Set(normalize_display_name(input.display_name)),
         status: Set(STATUS_PENDING.to_owned()),
@@ -71,6 +78,21 @@ pub async fn create(
     .insert(db)
     .await?;
     Ok(model)
+}
+
+fn resolve_delay_ms(
+    trigger_kind: &str,
+    fire_at: Option<DateTime<Utc>>,
+    delay_ms: Option<i64>,
+    now: DateTime<Utc>,
+) -> Option<i64> {
+    if trigger_kind != TRIGGER_AFTER {
+        return None;
+    }
+    if let Some(delay_ms) = delay_ms.filter(|value| *value > 0) {
+        return Some(delay_ms);
+    }
+    fire_at.map(|at| (at - now).num_milliseconds().max(1))
 }
 
 fn normalize_display_name(value: Option<String>) -> Option<String> {
@@ -103,15 +125,92 @@ pub async fn cancel(
     source_conversation_id: i32,
     id: i32,
 ) -> Result<agent_wake::Model, DbError> {
-    let row = agent_wake::Entity::find_by_id(id)
-        .filter(agent_wake::Column::SourceConversationId.eq(source_conversation_id))
-        .one(db)
-        .await?
-        .ok_or_else(|| DbError::NotFound(format!("agent_wake {id}")))?;
+    let row = find_scoped(db, source_conversation_id, id).await?;
+    if row.status == STATUS_DISPATCHING {
+        return Err(DbError::Validation(ERR_WAKE_DISPATCHING.into()));
+    }
+    if !matches!(row.status.as_str(), STATUS_PENDING) {
+        return Err(DbError::Validation(
+            "only pending wakes can be cancelled".into(),
+        ));
+    }
     let mut active: agent_wake::ActiveModel = row.into();
     active.status = Set(STATUS_CANCELLED.to_owned());
     active.error = Set(Some("cancelled".into()));
     active.updated_at = Set(Utc::now());
+    Ok(active.update(db).await?)
+}
+
+pub async fn delete(
+    db: &DatabaseConnection,
+    source_conversation_id: i32,
+    id: i32,
+) -> Result<(), DbError> {
+    let row = find_scoped(db, source_conversation_id, id).await?;
+    if row.status == STATUS_DISPATCHING {
+        return Err(DbError::Validation(ERR_WAKE_DISPATCHING.into()));
+    }
+    agent_wake::Entity::delete_by_id(id).exec(db).await?;
+    Ok(())
+}
+
+pub async fn rearm(
+    db: &DatabaseConnection,
+    source_conversation_id: i32,
+    id: i32,
+    live_terminal_ids: &[String],
+) -> Result<agent_wake::Model, DbError> {
+    let row = find_scoped(db, source_conversation_id, id).await?;
+    if row.status == STATUS_DISPATCHING {
+        return Err(DbError::Validation(ERR_WAKE_DISPATCHING.into()));
+    }
+    if !matches!(
+        row.status.as_str(),
+        STATUS_SENT | STATUS_FAILED | STATUS_CANCELLED
+    ) {
+        return Err(DbError::Validation(
+            "only inactive wakes can be rearmed".into(),
+        ));
+    }
+
+    let now = Utc::now();
+    let mut active: agent_wake::ActiveModel = row.clone().into();
+    match row.trigger_kind.as_str() {
+        TRIGGER_AFTER => {
+            let delay_ms = persisted_delay_ms(&row)?;
+            active.delay_ms = Set(Some(delay_ms));
+            active.fire_at = Set(Some(now + chrono::Duration::milliseconds(delay_ms)));
+        }
+        TRIGGER_AT => {
+            let fire_at = row.fire_at.unwrap_or(now);
+            if fire_at <= now {
+                return Err(DbError::Validation(ERR_WAKE_AT_PAST_REQUIRES_EDIT.into()));
+            }
+            active.fire_at = Set(Some(fire_at));
+        }
+        TRIGGER_PROCESS_EXIT => {
+            let terminal_id = row
+                .terminal_id
+                .as_deref()
+                .or(row.process_ref.as_deref())
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    DbError::Validation(ERR_WAKE_PROCESS_STALE_REQUIRES_EDIT.into())
+                })?;
+            if !live_terminal_ids.iter().any(|id| id == terminal_id) {
+                return Err(DbError::Validation(ERR_WAKE_PROCESS_STALE_REQUIRES_EDIT.into()));
+            }
+            active.fire_at = Set(None);
+        }
+        _ => {
+            return Err(DbError::Validation("unsupported wake trigger".into()));
+        }
+    }
+    active.status = Set(STATUS_PENDING.to_owned());
+    active.claimed_at = Set(None);
+    active.consumed_at = Set(None);
+    active.error = Set(None);
+    active.updated_at = Set(now);
     Ok(active.update(db).await?)
 }
 
@@ -134,39 +233,62 @@ pub async fn update(
             "process exit wake requires terminal_id".into(),
         ));
     }
-    let row = agent_wake::Entity::find_by_id(id)
-        .filter(agent_wake::Column::SourceConversationId.eq(source_conversation_id))
-        .one(db)
-        .await?
-        .ok_or_else(|| DbError::NotFound(format!("agent_wake {id}")))?;
-    if !matches!(row.status.as_str(), STATUS_PENDING | STATUS_DISPATCHING) {
-        return Err(DbError::Validation(
-            "fired or already cancelled wakes cannot be cancelled again".into(),
-        ));
+    if input.trigger_kind == TRIGGER_AT {
+        let fire_at = input
+            .fire_at
+            .ok_or_else(|| DbError::Validation("scheduled wake requires fire_at".into()))?;
+        if fire_at <= Utc::now() {
+            return Err(DbError::Validation(ERR_WAKE_AT_PAST_REQUIRES_EDIT.into()));
+        }
     }
-    if !matches!(row.status.as_str(), STATUS_PENDING | STATUS_DISPATCHING) {
-        return Err(DbError::Validation(
-            "fired or cancelled wakes cannot be edited".into(),
-        ));
+    let row = find_scoped(db, source_conversation_id, id).await?;
+    if row.status == STATUS_DISPATCHING {
+        return Err(DbError::Validation(ERR_WAKE_DISPATCHING.into()));
     }
+    let now = Utc::now();
+    let delay_ms = resolve_delay_ms(&input.trigger_kind, input.fire_at, input.delay_ms, now);
     let mut active: agent_wake::ActiveModel = row.into();
     active.source_connection_id = Set(input.source_connection_id);
     active.terminal_id = Set(input.terminal_id);
     active.process_ref = Set(input.process_ref);
     active.trigger_kind = Set(input.trigger_kind);
     active.fire_at = Set(input.fire_at);
+    active.delay_ms = Set(delay_ms);
     active.prompt = Set(input.prompt.trim().to_owned());
     active.display_name = Set(normalize_display_name(input.display_name));
     active.status = Set(STATUS_PENDING.to_owned());
     active.claimed_at = Set(None);
     active.consumed_at = Set(None);
     active.error = Set(None);
-    active.updated_at = Set(Utc::now());
+    active.updated_at = Set(now);
     Ok(active.update(db).await?)
 }
 
-/// Atomically claim due timer rows. The transaction and status predicate make
-/// this safe across desktop/server scheduler restarts and duplicate ticks.
+async fn find_scoped(
+    db: &DatabaseConnection,
+    source_conversation_id: i32,
+    id: i32,
+) -> Result<agent_wake::Model, DbError> {
+    agent_wake::Entity::find_by_id(id)
+        .filter(agent_wake::Column::SourceConversationId.eq(source_conversation_id))
+        .one(db)
+        .await?
+        .ok_or_else(|| DbError::NotFound(format!("agent_wake {id}")))
+}
+
+fn persisted_delay_ms(row: &agent_wake::Model) -> Result<i64, DbError> {
+    if let Some(delay_ms) = row.delay_ms.filter(|value| *value > 0) {
+        return Ok(delay_ms);
+    }
+    if let Some(fire_at) = row.fire_at {
+        return Ok((fire_at - row.created_at).num_milliseconds().max(1));
+    }
+    Err(DbError::Validation(
+        "timer_after wake is missing a persisted delay".into(),
+    ))
+}
+
+/// Atomically claim due timer rows.
 pub async fn claim_due(
     db: &DatabaseConnection,
     now: DateTime<Utc>,
@@ -324,6 +446,7 @@ mod tests {
             process_ref: None,
             trigger_kind: TRIGGER_AT.into(),
             fire_at: Some(Utc::now() + chrono::Duration::hours(1)),
+            delay_ms: None,
             prompt: "later".into(),
             display_name: None,
             creator_kind: "user".into(),
@@ -333,5 +456,65 @@ mod tests {
         assert_eq!(cancelled.status, STATUS_CANCELLED);
         assert_eq!(cancelled.error.as_deref(), Some("cancelled"));
         assert!(claim_due(&db.conn, Utc::now() + chrono::Duration::days(1), 10).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn rearm_timer_after_restarts_from_now() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/wake-rearm").await;
+        let source = seed_conversation(&db, folder, AgentType::Cursor).await;
+        let created = create(
+            &db.conn,
+            CreateWake {
+                source_conversation_id: source,
+                source_connection_id: None,
+                terminal_id: None,
+                process_ref: None,
+                trigger_kind: TRIGGER_AFTER.into(),
+                fire_at: Some(Utc::now() + chrono::Duration::seconds(30)),
+                delay_ms: Some(30_000),
+                prompt: "ping".into(),
+                display_name: None,
+                creator_kind: "user".into(),
+                creator_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        mark_sent(&db.conn, created.id).await.unwrap();
+        let before = Utc::now();
+        let rearmed = rearm(&db.conn, source, created.id, &[]).await.unwrap();
+        assert_eq!(rearmed.status, STATUS_PENDING);
+        assert_eq!(rearmed.delay_ms, Some(30_000));
+        let fire_at = rearmed.fire_at.expect("fire_at");
+        assert!(fire_at >= before + chrono::Duration::seconds(29));
+    }
+
+    #[tokio::test]
+    async fn delete_removes_inactive_wake() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/wake-delete").await;
+        let source = seed_conversation(&db, folder, AgentType::Cursor).await;
+        let row = create(
+            &db.conn,
+            CreateWake {
+                source_conversation_id: source,
+                source_connection_id: None,
+                terminal_id: None,
+                process_ref: None,
+                trigger_kind: TRIGGER_AFTER.into(),
+                fire_at: Some(Utc::now() + chrono::Duration::seconds(30)),
+                delay_ms: Some(30_000),
+                prompt: "ping".into(),
+                display_name: None,
+                creator_kind: "user".into(),
+                creator_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        mark_sent(&db.conn, row.id).await.unwrap();
+        delete(&db.conn, source, row.id).await.unwrap();
+        assert!(find_scoped(&db.conn, source, row.id).await.is_err());
     }
 }

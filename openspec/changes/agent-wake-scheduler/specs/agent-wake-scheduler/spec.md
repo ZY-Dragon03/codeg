@@ -86,3 +86,19 @@ The human Wake editor MUST select running programs from terminal metadata and MU
 
 - **WHEN** a user creates a process-exit wake from the UI
 - **THEN** the saved row MUST store the stable terminal id while the registry and editor show command/title metadata instead of requiring manual ID entry
+
+### Requirement: Registry MUST expose wake lifecycle as active state
+
+The automation registry MUST treat `pending` and `dispatching` as active (checked) and `sent`, `failed`, and `cancelled` as inactive (unchecked). A consumed one-shot wake MUST automatically appear inactive after an `automation-registry://changed` event. Unchecking an active pending wake MUST cancel it. Inactive wakes MUST be rearmed through `wake_rearm` or edit-and-save on the same wake id. Permanent delete MUST use `wake_delete`, not cancel.
+
+`timer_after` rearm MUST restart the persisted `delay_ms` from now. Past `timer_at` values MUST require editing before rearm. Stale `process_exit` terminal bindings MUST require selecting a live tracked task.
+
+#### Scenario: One-shot success deactivates wake
+
+- **WHEN** a wake fires successfully and its status becomes `sent`
+- **THEN** the registry MUST show the wake as inactive and emit a registry change notification
+
+#### Scenario: Rearm restarts delay from now
+
+- **WHEN** a user re-enables a consumed `timer_after` wake
+- **THEN** the backend MUST set `fire_at = now + delay_ms` using the persisted delay, not the original `created_at`

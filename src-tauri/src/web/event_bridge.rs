@@ -360,6 +360,32 @@ pub enum AutomationChange {
     },
 }
 
+/// Event-automation registry (event rules + wakes) changed. Clients refetch the
+/// unified registry list when wakes or event rules are created, updated, rearmed,
+/// cancelled, deleted, or reach a terminal lifecycle state.
+pub const AUTOMATION_REGISTRY_CHANGED_EVENT: &str = "automation-registry://changed";
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AutomationRegistryChange {
+    pub wake_id: Option<i32>,
+    pub event_rule_id: Option<i32>,
+}
+
+pub fn emit_automation_registry_changed(
+    emitter: &EventEmitter,
+    wake_id: Option<i32>,
+    event_rule_id: Option<i32>,
+) {
+    emit_event(
+        emitter,
+        AUTOMATION_REGISTRY_CHANGED_EVENT,
+        AutomationRegistryChange {
+            wake_id,
+            event_rule_id,
+        },
+    );
+}
+
 /// Global side-channel for cross-client work-task board sync. Mirrors
 /// [`AUTOMATION_CHANGED_EVENT`]: the task engine runs headless, so this
 /// broadcast is the only way an open tasks view (or the sidebar badge) learns a

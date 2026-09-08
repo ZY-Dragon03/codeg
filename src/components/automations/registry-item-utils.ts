@@ -40,21 +40,40 @@ export function isRegistryWake(
   return resolveRegistryItemKind(item) === "wake"
 }
 
-export function isWakePending(wake: WakeRecord): boolean {
+export function isWakeDispatching(wake: WakeRecord): boolean {
+  return wake.status === "dispatching"
+}
+
+export function isWakeActive(wake: WakeRecord): boolean {
   if (wake.status === "pending" || wake.status === "dispatching") return true
-  return wake.enabled && wake.status != "sent" && wake.status != "failed" && wake.status != "cancelled"
+  if (
+    wake.status === "sent" ||
+    wake.status === "failed" ||
+    wake.status === "cancelled"
+  ) {
+    return false
+  }
+  return Boolean(wake.enabled)
+}
+
+export function isWakePending(wake: WakeRecord): boolean {
+  return isWakeActive(wake)
 }
 
 export function isWakeTerminal(wake: WakeRecord): boolean {
   return (
     wake.status === "sent" ||
     wake.status === "failed" ||
-    wake.status === "cancelled" ||
-    (!wake.enabled &&
-      wake.status != null &&
-      wake.status !== "pending" &&
-      wake.status !== "dispatching")
+    wake.status === "cancelled"
   )
+}
+
+export function isWakeSwitchDisabled(wake: WakeRecord): boolean {
+  return isWakeDispatching(wake)
+}
+
+export function isWakeEditable(wake: WakeRecord): boolean {
+  return !isWakeDispatching(wake)
 }
 
 export function wakeScheduleDescription(

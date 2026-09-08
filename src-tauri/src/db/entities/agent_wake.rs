@@ -14,6 +14,7 @@ pub struct Model {
     pub process_ref: Option<String>,
     pub trigger_kind: String,
     pub fire_at: Option<DateTimeUtc>,
+    pub delay_ms: Option<i64>,
     pub prompt: String,
     pub display_name: Option<String>,
     pub status: String,

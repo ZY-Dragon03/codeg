@@ -5796,7 +5796,7 @@
       "wakeStatusCancelled": "Annulé",
       "cancelWakeAction": "Annuler",
       "cancelWakeTitle": "Annuler le réveil ?",
-      "cancelWakeDescription": "« {name} » n’attendra plus et n’enverra pas son message.",
+      "cancelWakeDescription": "Après annulation, il ne se déclenchera pas lorsque la condition sera remplie.",
       "cancelWakeConfirm": "Annuler le réveil",
       "wakeCancelMissingTarget": "Ce réveil n’a pas de conversation cible pour l’annulation.",
       "deleteEventRuleTitle": "Supprimer l’automatisation ?",
@@ -5805,7 +5805,16 @@
       "wakeCancelled": "Réveil annulé.",
       "ruleSaved": "Automatisation enregistrée.",
       "ruleUpdated": "Automatisation mise à jour.",
-      "ruleDeleted": "Automatisation supprimée."
+      "ruleDeleted": "Automatisation supprimée.",
+      "deleteWakeTitle": "Supprimer ce réveil ?",
+      "deleteWakeDescription": "Cela supprime définitivement l’enregistrement.",
+      "wakeSavedAndRearmed": "Réveil enregistré et réactivé.",
+      "wakeSaveAndRearm": "Enregistrer et réactiver",
+      "wakeRearmed": "Réveil réactivé.",
+      "wakeDeleted": "Réveil supprimé définitivement.",
+      "wakeDispatchingHint": "Déclenchement en cours — veuillez patienter.",
+      "wakeRearmPastAtNotice": "L’heure prévue est passée. Choisissez une nouvelle heure future.",
+      "wakeRearmStaleProcessNotice": "La tâche d’origine ne tourne plus. Choisissez une autre tâche Codeg."
     },
     "wakeProcessHelp": "Affiche les tâches lancées dans les terminaux Codeg encore actives dans cette application.",
     "wakeProcessMaybeConversation": "Peut appartenir à : {title}"

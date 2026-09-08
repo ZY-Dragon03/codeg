@@ -184,3 +184,39 @@ Registry is the level-one surface inside the dialog. Content Detection, Completi
 
 - **WHEN** no eligible running terminal exists for process-exit wake creation
 - **THEN** the UI MUST show an empty-state message instead of a free-text process ID field
+
+### Requirement: Wake registry active state MUST mirror lifecycle status
+
+In the automation registry, Wake rows MUST use the same active control pattern as Event Rules. `pending` and `dispatching` MUST render as active/checked. `sent`, `failed`, and `cancelled` MUST render as inactive/unchecked. The checked state MUST be derived only from wake `status` (and legacy rows without status while still enabled), not from a separate frontend enabled flag.
+
+A successful one-shot fire MUST automatically move the wake from active to inactive in the registry UI after refresh. Unchecking an active pending wake MUST mean cancel and MUST call the existing cancel API after explicit confirmation. Terminal wakes MUST be re-enabled through `wake_rearm` or edit-and-save, not by silently toggling a disabled switch. Switching OFF cancels; Trash permanently deletes.
+
+#### Scenario: Pending wake shows active
+
+- **WHEN** a wake row has status `pending`
+- **THEN** the registry MUST show a checked active control and a pending status label
+
+#### Scenario: Successful fire becomes inactive
+
+- **WHEN** a pending wake transitions to `sent` after firing
+- **THEN** the registry MUST show an unchecked control and a sent status label without manual refresh beyond the registry change event
+
+#### Scenario: Unchecking an active wake cancels it
+
+- **WHEN** a user unchecks an active pending wake and confirms cancellation
+- **THEN** the wake MUST be cancelled via the existing cancel API and the row MUST reload as unchecked with status cancelled
+
+#### Scenario: Inactive wake can be rearmed
+
+- **WHEN** a user checks an inactive `sent`, `failed`, or `cancelled` wake and rearm preconditions are satisfied
+- **THEN** the same wake id MUST return to `pending` with a freshly computed schedule
+
+#### Scenario: Terminal wake can be edited and re-enabled
+
+- **WHEN** a user edits a `sent`, `failed`, or `cancelled` wake and saves
+- **THEN** the wake MUST return to `pending` and show as checked in the registry
+
+#### Scenario: Wake can be permanently deleted
+
+- **WHEN** a user deletes a stable wake row from the registry
+- **THEN** the wake MUST be removed from persistent storage and MUST NOT fire again

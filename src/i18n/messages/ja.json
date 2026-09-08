@@ -5795,8 +5795,8 @@
       "wakeStatusFailed": "失敗",
       "wakeStatusCancelled": "キャンセル済み",
       "cancelWakeAction": "キャンセル",
-      "cancelWakeTitle": "Wake をキャンセルしますか？",
-      "cancelWakeDescription": "「{name}」の待機を停止し、メッセージは送信されません。",
+      "cancelWakeTitle": "この Wake をキャンセルしますか？",
+      "cancelWakeDescription": "キャンセル後は条件が満たされてもトリガーされません。",
       "cancelWakeConfirm": "キャンセルする",
       "wakeCancelMissingTarget": "この Wake にはキャンセル対象の会話がありません。",
       "deleteEventRuleTitle": "自動化を削除しますか？",
@@ -5805,7 +5805,16 @@
       "wakeCancelled": "Wake をキャンセルしました。",
       "ruleSaved": "自動化を保存しました。",
       "ruleUpdated": "自動化を更新しました。",
-      "ruleDeleted": "自動化を削除しました。"
+      "ruleDeleted": "自動化を削除しました。",
+      "deleteWakeTitle": "この Wake を削除しますか？",
+      "deleteWakeDescription": "この記録は完全に削除されます。",
+      "wakeSavedAndRearmed": "Wake を保存して再び有効化しました。",
+      "wakeSaveAndRearm": "保存して再有効化",
+      "wakeRearmed": "Wake を再有効化しました。",
+      "wakeDeleted": "Wake を完全に削除しました。",
+      "wakeDispatchingHint": "トリガー中です。しばらくお待ちください。",
+      "wakeRearmPastAtNotice": "元の指定時刻は過ぎています。新しい未来の時刻を選んで再有効化してください。",
+      "wakeRearmStaleProcessNotice": "元のタスクは実行されていません。別の Codeg 追跡タスクを選んでください。"
     },
     "wakeProcessHelp": "Codeg ターミナルで起動し、このアプリ内でまだ実行中のタスクを表示します。",
     "wakeProcessMaybeConversation": "所属の可能性: {title}"

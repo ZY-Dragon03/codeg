@@ -11,7 +11,7 @@ use crate::acp::types::PromptInputBlock;
 use crate::db::service::agent_wake_service as wakes;
 use crate::db::AppDatabase;
 use crate::db::entities::conversation;
-use crate::web::event_bridge::EventEmitter;
+use crate::web::event_bridge::{emit_automation_registry_changed, EventEmitter};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 pub struct WakeScheduler {
@@ -150,6 +150,7 @@ impl WakeScheduler {
                 "target_unavailable: source conversation not found".into(),
             )
             .await;
+            emit_automation_registry_changed(&self.emitter, Some(wake.id), None);
             return;
         };
         let (emitter, owner_window_label) = if let Some(source_connection_id) =
@@ -175,12 +176,8 @@ impl WakeScheduler {
         {
             Ok(connection_id) => connection_id,
             Err(error) => {
-                let _ = wakes::mark_failed(
-                    &self.db.conn,
-                    wake.id,
-                    format!("target_unavailable: {error}"),
-                )
-                .await;
+                let _ = wakes::mark_failed(&self.db.conn, wake.id, error.to_string()).await;
+                emit_automation_registry_changed(&self.emitter, Some(wake.id), None);
                 return;
             }
         };
@@ -203,9 +200,11 @@ impl WakeScheduler {
                 if let Err(error) = wakes::mark_sent(&self.db.conn, wake.id).await {
                     tracing::error!(wake_id = wake.id, "[wake] sent but receipt failed: {error}");
                 }
+                emit_automation_registry_changed(&self.emitter, Some(wake.id), None);
             }
             Err(error) => {
                 let _ = wakes::mark_failed(&self.db.conn, wake.id, error.to_string()).await;
+                emit_automation_registry_changed(&self.emitter, Some(wake.id), None);
             }
         }
     }

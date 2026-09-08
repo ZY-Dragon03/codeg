@@ -5796,7 +5796,7 @@
       "wakeStatusCancelled": "Abgebrochen",
       "cancelWakeAction": "Abbrechen",
       "cancelWakeTitle": "Wake abbrechen?",
-      "cancelWakeDescription": "„{name}“ wird nicht mehr warten und keine Nachricht senden.",
+      "cancelWakeDescription": "Nach dem Abbrechen wird er bei der nächsten Bedingung nicht ausgelöst.",
       "cancelWakeConfirm": "Wake abbrechen",
       "wakeCancelMissingTarget": "Für diesen Wake gibt es keine Zielkonversation zum Abbrechen.",
       "deleteEventRuleTitle": "Automatisierung löschen?",
@@ -5805,7 +5805,16 @@
       "wakeCancelled": "Wake abgebrochen.",
       "ruleSaved": "Automatisierung gespeichert.",
       "ruleUpdated": "Automatisierung aktualisiert.",
-      "ruleDeleted": "Automatisierung gelöscht."
+      "ruleDeleted": "Automatisierung gelöscht.",
+      "deleteWakeTitle": "Diesen Wake löschen?",
+      "deleteWakeDescription": "Dies löscht den gespeicherten Datensatz dauerhaft.",
+      "wakeSavedAndRearmed": "Wake gespeichert und wieder aktiviert.",
+      "wakeSaveAndRearm": "Speichern und wieder aktivieren",
+      "wakeRearmed": "Wake wieder aktiviert.",
+      "wakeDeleted": "Wake dauerhaft gelöscht.",
+      "wakeDispatchingHint": "Wird ausgelöst — bitte warten.",
+      "wakeRearmPastAtNotice": "Die ursprüngliche Zeit liegt in der Vergangenheit. Wählen Sie eine neue zukünftige Zeit.",
+      "wakeRearmStaleProcessNotice": "Die ursprüngliche Aufgabe läuft nicht mehr. Wählen Sie eine andere Codeg-Aufgabe."
     },
     "wakeProcessHelp": "Zeigt Aufgaben aus Codeg-Terminals, die in dieser App noch laufen.",
     "wakeProcessMaybeConversation": "Gehört möglicherweise zu: {title}"

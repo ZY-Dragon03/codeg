@@ -5795,8 +5795,8 @@
       "wakeStatusFailed": "실패",
       "wakeStatusCancelled": "취소됨",
       "cancelWakeAction": "취소",
-      "cancelWakeTitle": "Wake를 취소할까요?",
-      "cancelWakeDescription": "“{name}” 대기가 중단되며 메시지가 전송되지 않습니다.",
+      "cancelWakeTitle": "이 Wake를 취소할까요?",
+      "cancelWakeDescription": "취소 후에는 조건이 충족되어도 실행되지 않습니다.",
       "cancelWakeConfirm": "취소 확인",
       "wakeCancelMissingTarget": "이 Wake에는 취소할 대상 대화가 없습니다.",
       "deleteEventRuleTitle": "자동화를 삭제할까요?",
@@ -5805,7 +5805,16 @@
       "wakeCancelled": "Wake가 취소되었습니다.",
       "ruleSaved": "자동화가 저장되었습니다.",
       "ruleUpdated": "자동화가 업데이트되었습니다.",
-      "ruleDeleted": "자동화가 삭제되었습니다."
+      "ruleDeleted": "자동화가 삭제되었습니다.",
+      "deleteWakeTitle": "이 Wake를 삭제할까요?",
+      "deleteWakeDescription": "이 기록은 영구적으로 삭제됩니다.",
+      "wakeSavedAndRearmed": "Wake를 저장하고 다시 활성화했습니다.",
+      "wakeSaveAndRearm": "저장하고 다시 활성화",
+      "wakeRearmed": "Wake를 다시 활성화했습니다.",
+      "wakeDeleted": "Wake를 영구 삭제했습니다.",
+      "wakeDispatchingHint": "트리거 중입니다. 잠시만 기다려 주세요.",
+      "wakeRearmPastAtNotice": "원래 지정 시간이 지났습니다. 새로운 미래 시간을 선택한 후 다시 활성화하세요.",
+      "wakeRearmStaleProcessNotice": "원래 작업이 더 이상 실행 중이 아닙니다. 다른 Codeg 추적 작업을 선택하세요."
     },
     "wakeProcessHelp": "Codeg 터미널에서 시작되어 이 앱에서 여전히 실행 중인 작업을 표시합니다.",
     "wakeProcessMaybeConversation": "다음에 속할 수 있음: {title}"

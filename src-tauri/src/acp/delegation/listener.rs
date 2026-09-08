@@ -457,6 +457,7 @@ impl EventAutomationAccess for ConnectionEventAutomationAccess {
             process_ref: req.process_ref,
             trigger_kind: req.trigger_kind,
             fire_at,
+            delay_ms: None,
             prompt: req.prompt,
             display_name: None,
             creator_kind: "agent".into(),

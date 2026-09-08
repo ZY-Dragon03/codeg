@@ -109,9 +109,13 @@ fn wake_schedule(row: &agent_wake::Model) -> WakeSchedule {
     match row.trigger_kind.as_str() {
         crate::db::service::agent_wake_service::TRIGGER_AFTER => WakeSchedule::After {
             delay_ms: row
-                .fire_at
-                .map(|at| (at - row.created_at).num_milliseconds().max(1))
-                .unwrap_or(1),
+                .delay_ms
+                .filter(|value| *value > 0)
+                .unwrap_or_else(|| {
+                    row.fire_at
+                        .map(|at| (at - row.created_at).num_milliseconds().max(1))
+                        .unwrap_or(1)
+                }),
         },
         crate::db::service::agent_wake_service::TRIGGER_AT => WakeSchedule::At {
             at: row.fire_at.unwrap_or(row.created_at),
@@ -190,6 +194,7 @@ mod tests {
                 process_ref: None,
                 trigger_kind: TRIGGER_AT.into(),
                 fire_at: Some(Utc::now() + chrono::Duration::seconds(20)),
+                delay_ms: None,
                 prompt: "wake me".into(),
                 display_name: None,
                 creator_kind: "agent".into(),

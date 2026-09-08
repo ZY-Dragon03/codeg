@@ -3617,6 +3617,7 @@ type WakeBackendDraft = {
   processRef: string | null
   triggerKind: "timer_after" | "timer_at" | "process_exit"
   fireAt: string | null
+  delayMs: number | null
   prompt: string
   displayName: string | null
   creatorKind: "user"
@@ -3646,6 +3647,7 @@ function toWakeBackendDraft(
       processRef: null,
       triggerKind: "timer_after",
       fireAt: new Date(Date.now() + schedule.delay_ms).toISOString(),
+      delayMs: schedule.delay_ms,
       prompt: draft.prompt?.trim() ?? "",
       displayName,
       creatorKind: "user",
@@ -3660,6 +3662,7 @@ function toWakeBackendDraft(
       processRef: null,
       triggerKind: "timer_at",
       fireAt: new Date(schedule.at).toISOString(),
+      delayMs: null,
       prompt: draft.prompt?.trim() ?? "",
       displayName,
       creatorKind: "user",
@@ -3673,6 +3676,7 @@ function toWakeBackendDraft(
     processRef: schedule.process_id == null ? null : String(schedule.process_id),
     triggerKind: "process_exit",
     fireAt: null,
+    delayMs: null,
     prompt: draft.prompt?.trim() ?? "",
     displayName,
     creatorKind: "user",
@@ -3711,6 +3715,26 @@ export async function wakeCancel(
   sourceConversationId?: number | null
 ): Promise<void> {
   return getTransport().call("wake_cancel", {
+    id,
+    sourceConversationId: sourceConversationId ?? 0,
+  })
+}
+
+export async function wakeDelete(
+  id: number,
+  sourceConversationId?: number | null
+): Promise<void> {
+  return getTransport().call("wake_delete", {
+    id,
+    sourceConversationId: sourceConversationId ?? 0,
+  })
+}
+
+export async function wakeRearm(
+  id: number,
+  sourceConversationId?: number | null
+): Promise<WakeRecord> {
+  return getTransport().call("wake_rearm", {
     id,
     sourceConversationId: sourceConversationId ?? 0,
   })

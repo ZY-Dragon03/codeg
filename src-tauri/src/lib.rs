@@ -1588,6 +1588,8 @@ mod tauri_app {
                 wake_commands::wake_list,
                 wake_commands::wake_create,
                 wake_commands::wake_cancel,
+                wake_commands::wake_delete,
+                wake_commands::wake_rearm,
                 wake_commands::wake_update,
                 event_rule_commands::event_rule_get,
                 event_rule_commands::event_rule_create,

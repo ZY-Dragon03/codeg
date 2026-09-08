@@ -1337,6 +1337,8 @@ pub fn build_router(
         .route("/wake_list", post(handlers::wake::wake_list))
         .route("/wake_create", post(handlers::wake::wake_create))
         .route("/wake_cancel", post(handlers::wake::wake_cancel))
+        .route("/wake_delete", post(handlers::wake::wake_delete))
+        .route("/wake_rearm", post(handlers::wake::wake_rearm))
         .route("/wake_update", post(handlers::wake::wake_update))
         // Event automations
         .route("/event_rule_list", post(handlers::event_rule::event_rule_list))

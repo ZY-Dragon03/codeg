@@ -13,6 +13,8 @@ import {
   listAllConversations,
   wakeCancel,
   wakeCreate,
+  wakeDelete,
+  wakeRearm,
   wakeUpdate,
 } from "@/lib/api"
 import type {
@@ -25,7 +27,7 @@ import type {
 } from "@/lib/types"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { cn } from "@/lib/utils"
-import { onTransportReconnect } from "@/lib/platform"
+import { onTransportReconnect, subscribe } from "@/lib/platform"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -55,13 +57,26 @@ import { automationPanelScrollClass } from "./automation-dialog-layout"
 import {
   isRegistryEventRule,
   isRegistryWake,
+  isWakeActive,
+  isWakeDispatching,
+  isWakeEditable,
   isWakePending,
+  isWakeSwitchDisabled,
   isWakeTerminal,
   wakeScheduleDescription,
   wakeSourceConversationId,
 } from "./registry-item-utils"
 
 type SortKey = "active" | "applicable" | "priority" | "id"
+
+const AUTOMATION_REGISTRY_CHANGED_EVENT = "automation-registry://changed"
+
+type WakeEditorContext =
+  | "new"
+  | {
+      wake: WakeRecord
+      rearmNotice?: "past_at" | "stale_process"
+    }
 
 function formatActionError(cause: unknown): string {
   if (cause instanceof Error) return cause.message
@@ -95,7 +110,7 @@ export function AutomationRegistryPanel({
   const [editingRule, setEditingRule] = useState<EventRule | "new" | null>(null)
   const [newAutomationType, setNewAutomationType] =
     useState<EventRuleAutomationType>("content_detection")
-  const [editingWake, setEditingWake] = useState<WakeRecord | "new" | null>(null)
+  const [editingWake, setEditingWake] = useState<WakeEditorContext | null>(null)
   const [selectedLogRule, setSelectedLogRule] = useState<number | null>(null)
   const [logs, setLogs] = useState<EventRuleLog[]>([])
   const [logsLoading, setLogsLoading] = useState(false)
@@ -106,6 +121,9 @@ export function AutomationRegistryPanel({
     null
   )
   const [pendingCancelWake, setPendingCancelWake] = useState<WakeRecord | null>(
+    null
+  )
+  const [pendingDeleteWake, setPendingDeleteWake] = useState<WakeRecord | null>(
     null
   )
 
@@ -135,9 +153,14 @@ export function AutomationRegistryPanel({
     }
     window.addEventListener("focus", refresh)
     const off = onTransportReconnect(refresh)
+    let registryOff: (() => void) | undefined
+    void subscribe(AUTOMATION_REGISTRY_CHANGED_EVENT, refresh).then((unsub) => {
+      registryOff = unsub
+    })
     return () => {
       window.removeEventListener("focus", refresh)
       off?.()
+      registryOff?.()
     }
   }, [reloadRegistry])
 
@@ -284,11 +307,43 @@ export function AutomationRegistryPanel({
   }
 
   const saveWake = async (draft: WakeDraft) => {
-    if (editingWake === "new") await wakeCreate(draft, conversationId)
-    else if (editingWake) await wakeUpdate(editingWake.id, draft, conversationId)
+    if (editingWake === "new") {
+      await wakeCreate(draft, conversationId)
+      setNotice(t("registry.wakeSaved"))
+    } else if (editingWake) {
+      await wakeUpdate(editingWake.wake.id, draft, conversationId)
+      setNotice(
+        isWakeTerminal(editingWake.wake)
+          ? t("registry.wakeSavedAndRearmed")
+          : t("registry.wakeSaved")
+      )
+    }
     setEditingWake(null)
-    setNotice(t("registry.wakeSaved"))
     await reloadRegistry()
+  }
+
+  const handleWakeRearm = async (wake: WakeRecord) => {
+    const sourceId = wakeSourceConversationId(wake)
+    if (!sourceId) {
+      setError(t("registry.wakeCancelMissingTarget"))
+      return
+    }
+    try {
+      await wakeRearm(wake.id, sourceId)
+      setNotice(t("registry.wakeRearmed"))
+      await reloadRegistry()
+    } catch (cause) {
+      const message = formatActionError(cause)
+      if (message.includes("wake_at_past_requires_edit")) {
+        setEditingWake({ wake, rearmNotice: "past_at" })
+        return
+      }
+      if (message.includes("wake_process_stale_requires_edit")) {
+        setEditingWake({ wake, rearmNotice: "stale_process" })
+        return
+      }
+      setError(message)
+    }
   }
 
   const loadLogs = async (ruleId: number) => {
@@ -361,18 +416,27 @@ export function AutomationRegistryPanel({
   }
 
   if (editingWake) {
+    const editingWakeRecord = editingWake === "new" ? null : editingWake.wake
     return (
       <div className={dialog ? automationPanelScrollClass : undefined}>
         <WakeEditor
-        wake={editingWake === "new" ? null : editingWake}
-        defaultTargetConversationId={conversationId}
-        conversations={conversations}
-        subpageTitle={
-          editingWake === "new" ? t("wakeEditorTitle") : t("wakeEditTitle")
-        }
-        onSubmit={saveWake}
-        onCancel={() => setEditingWake(null)}
-      />
+          wake={editingWakeRecord}
+          defaultTargetConversationId={conversationId}
+          conversations={conversations}
+          subpageTitle={
+            editingWake === "new" ? t("wakeEditorTitle") : t("wakeEditTitle")
+          }
+          rearmNotice={
+            editingWake === "new" ? undefined : editingWake.rearmNotice
+          }
+          saveLabel={
+            editingWakeRecord && isWakeTerminal(editingWakeRecord)
+              ? t("registry.wakeSaveAndRearm")
+              : undefined
+          }
+          onSubmit={saveWake}
+          onCancel={() => setEditingWake(null)}
+        />
       </div>
     )
   }
@@ -500,7 +564,7 @@ export function AutomationRegistryPanel({
               onEdit={() =>
                 isRegistryEventRule(item)
                   ? setEditingRule(item)
-                  : setEditingWake(item)
+                  : setEditingWake({ wake: item as WakeRecord })
               }
               onViewLogs={
                 isRegistryEventRule(item)
@@ -508,13 +572,22 @@ export function AutomationRegistryPanel({
                   : undefined
               }
               onRequestDelete={(rule) => setPendingDeleteRule(rule)}
-              onRequestCancel={(wake) => setPendingCancelWake(wake)}
+              onRequestDeleteWake={(wake) => setPendingDeleteWake(wake)}
               onToggleEnabled={(rule, enabled) =>
                 void runAction(
                   () => eventRuleSetEnabled(rule.id, enabled),
                   { successMessage: t("registry.ruleUpdated") }
                 )
               }
+              onToggleWake={(wake, checked) => {
+                if (!checked && isWakeActive(wake)) {
+                  setPendingCancelWake(wake)
+                  return
+                }
+                if (checked && isWakeTerminal(wake)) {
+                  void handleWakeRearm(wake)
+                }
+              }}
             />
           ))
         ) : (
@@ -591,9 +664,7 @@ export function AutomationRegistryPanel({
           <AlertDialogHeader>
             <AlertDialogTitle>{t("registry.cancelWakeTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t("registry.cancelWakeDescription", {
-                name: pendingCancelWake?.name ?? t("wake"),
-              })}
+              {t("registry.cancelWakeDescription")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -619,6 +690,43 @@ export function AutomationRegistryPanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog
+        open={pendingDeleteWake != null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteWake(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("registry.deleteWakeTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("registry.deleteWakeDescription")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("editor.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const wake = pendingDeleteWake
+                setPendingDeleteWake(null)
+                if (!wake) return
+                const sourceId = wakeSourceConversationId(wake)
+                if (!sourceId) {
+                  setError(t("registry.wakeCancelMissingTarget"))
+                  return
+                }
+                void runAction(
+                  () => wakeDelete(wake.id, sourceId),
+                  { successMessage: t("registry.wakeDeleted") }
+                )
+              }}
+            >
+              {t("delete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -640,8 +748,9 @@ function RegistryRow({
   onEdit,
   onViewLogs,
   onRequestDelete,
-  onRequestCancel,
+  onRequestDeleteWake,
   onToggleEnabled,
+  onToggleWake,
 }: {
   item: AutomationRegistryItem
   conversations: Awaited<ReturnType<typeof listAllConversations>>
@@ -652,8 +761,9 @@ function RegistryRow({
   onEdit: () => void
   onViewLogs?: () => void
   onRequestDelete: (rule: EventRule) => void
-  onRequestCancel: (wake: WakeRecord) => void
+  onRequestDeleteWake: (wake: WakeRecord) => void
   onToggleEnabled: (rule: EventRule, enabled: boolean) => void
+  onToggleWake: (wake: WakeRecord, checked: boolean) => void
 }) {
   const t = useTranslations("EventAutomations")
   const event = isRegistryEventRule(item)
@@ -708,8 +818,24 @@ function RegistryRow({
 
   return (
     <li className="rounded-xl border p-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
+      <div className="flex items-start gap-3">
+        {event ? (
+          <Switch
+            className="mt-0.5 shrink-0"
+            checked={item.enabled}
+            onCheckedChange={(enabled) => onToggleEnabled(item, enabled)}
+            aria-label={item.enabled ? t("enabled") : t("disabled")}
+          />
+        ) : wake ? (
+          <Switch
+            className="mt-0.5 shrink-0"
+            checked={isWakeActive(wake)}
+            disabled={isWakeSwitchDisabled(wake)}
+            onCheckedChange={(checked) => onToggleWake(wake, checked)}
+            aria-label={isWakeActive(wake) ? t("enabled") : t("disabled")}
+          />
+        ) : null}
+        <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium">{name}</span>
             <span className="rounded-full bg-muted px-2 py-0.5 text-[11px]">
@@ -718,33 +844,29 @@ function RegistryRow({
             <span className="rounded-full bg-muted px-2 py-0.5 text-[11px]">
               {item.provenance ?? "user"}
             </span>
-            {wakeStatusLabel ? (
-              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px]">
-                {wakeStatusLabel}
-              </span>
-            ) : null}
             {applicable ? (
               <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px]">
                 {t("scopeConversation")}
               </span>
             ) : null}
           </div>
+          {wakeStatusLabel ? (
+            <p className="mt-1 text-sm text-muted-foreground">{wakeStatusLabel}</p>
+          ) : null}
           <p className="mt-1 text-xs text-muted-foreground">
             {scopeText} · {scheduleText}
             {target ? ` · ${target}` : ""}
           </p>
+          {wake?.error && isWakeTerminal(wake) ? (
+            <p className="mt-1 text-xs text-destructive">{wake.error}</p>
+          ) : null}
+          {wake && isWakeDispatching(wake) ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t("registry.wakeDispatchingHint")}
+            </p>
+          ) : null}
         </div>
-        {event ? (
-          <Switch
-            checked={item.enabled}
-            onCheckedChange={(enabled) => onToggleEnabled(item, enabled)}
-            aria-label={item.enabled ? t("enabled") : t("disabled")}
-          />
-        ) : null}
-      </div>
-      <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-        <span>{item.creator ?? t("registryUserCreated")}</span>
-        <div className="flex gap-1">
+        <div className="flex shrink-0 gap-1">
           {onViewLogs ? (
             <Button size="sm" variant="ghost" onClick={onViewLogs}>
               {t("logs.title")}
@@ -755,7 +877,7 @@ function RegistryRow({
             variant="ghost"
             aria-label={`${t("edit")} ${name}`}
             onClick={onEdit}
-            disabled={wake ? isWakeTerminal(wake) : false}
+            disabled={wake ? !isWakeEditable(wake) : false}
           >
             <Pencil className="size-4" />
           </Button>
@@ -768,17 +890,21 @@ function RegistryRow({
             >
               <Trash2 className="size-4" />
             </Button>
-          ) : null}
-          {wake && isWakePending(wake) ? (
+          ) : wake ? (
             <Button
-              size="sm"
+              size="icon-sm"
               variant="ghost"
-              onClick={() => onRequestCancel(wake)}
+              aria-label={`${t("delete")} ${name}`}
+              onClick={() => onRequestDeleteWake(wake)}
+              disabled={isWakeDispatching(wake)}
             >
-              {t("registry.cancelWakeAction")}
+              <Trash2 className="size-4" />
             </Button>
           ) : null}
         </div>
+      </div>
+      <div className="mt-3 text-xs text-muted-foreground">
+        <span>{item.creator ?? t("registryUserCreated")}</span>
       </div>
     </li>
   )
