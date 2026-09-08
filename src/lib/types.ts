@@ -1656,6 +1656,7 @@ export interface WakeRecord {
   description?: string | null
   creator?: string | null
   provenance?: AutomationRegistryProvenance
+  error?: string | null
   created_at?: string
   updated_at?: string
   cancelled_at?: string | null

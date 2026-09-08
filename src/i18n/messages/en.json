@@ -5656,7 +5656,7 @@
       "cancelWakeTitle": "Cancel this wake?",
       "cancelWakeDescription": "It will not fire when its condition is next met.",
       "cancelWakeConfirm": "Cancel wake",
-      "wakeCancelMissingTarget": "This wake has no target conversation to cancel against.",
+      "wakeCancelMissingTarget": "The target conversation no longer exists or this wake record is corrupted.",
       "deleteEventRuleTitle": "Delete automation?",
       "deleteWakeTitle": "Delete this wake?",
       "deleteWakeDescription": "This permanently deletes the saved record.",

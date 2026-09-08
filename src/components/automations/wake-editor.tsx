@@ -28,16 +28,7 @@ import {
   AutomationSubpageForm,
   AutomationSubpageSurface,
 } from "./automation-dialog-layout"
-import {
-  delayToMs,
-  formatClientTimezone,
-  isAutoWakeName,
-  msToDelayParts,
-  parseDatetimeLocalToIso,
-  toDatetimeLocalValue,
-  type DelayUnit,
-  validateWakeDraft,
-} from "./wake-editor-utils"
+import { resolveWakeConversationId } from "@/lib/wake-wire"
 
 type WakeScheduleKind = "after" | "at" | "process_exit"
 
@@ -118,7 +109,10 @@ export function WakeEditor({
   )
   const preferredFolderPath = useMemo(() => {
     const conversationId =
-      wake?.target_conversation_id ?? defaultTargetConversationId
+      resolveWakeConversationId({
+        target_conversation_id: wake?.target_conversation_id,
+        target: wake?.target,
+      }) ?? defaultTargetConversationId
     if (!conversationId) return null
     const conversation = conversations.find((item) => item.id === conversationId)
     if (!conversation) return null
@@ -139,7 +133,12 @@ export function WakeEditor({
     initialProcessId(wake)
   )
   const [targetConversationId, setTargetConversationId] = useState(() =>
-    String(wake?.target_conversation_id ?? defaultTargetConversationId ?? "")
+    String(
+      resolveWakeConversationId({
+        target_conversation_id: wake?.target_conversation_id,
+        target: wake?.target,
+      }) ?? defaultTargetConversationId ?? ""
+    )
   )
   const [terminals, setTerminals] = useState<Awaited<ReturnType<typeof terminalList>>>(
     []

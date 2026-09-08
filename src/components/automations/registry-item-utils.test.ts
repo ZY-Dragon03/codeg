@@ -6,6 +6,7 @@ import {
   isWakePending,
   isWakeTerminal,
   resolveRegistryItemKind,
+  wakeSourceConversationId,
 } from "./registry-item-utils"
 import type { AutomationRegistryItem } from "@/lib/types"
 
@@ -36,6 +37,19 @@ describe("registry-item-utils", () => {
     } as AutomationRegistryItem
 
     expect(resolveRegistryItemKind(item)).toBe("wake")
+  })
+
+  it("resolves wake conversation id from target string fallback", () => {
+    expect(
+      wakeSourceConversationId({
+        id: 1,
+        name: "x",
+        enabled: true,
+        status: "pending",
+        schedule: { kind: "after", delay_ms: 1000 },
+        target: "conversation:42",
+      })
+    ).toBe(42)
   })
 
   it("tracks wake lifecycle states", () => {

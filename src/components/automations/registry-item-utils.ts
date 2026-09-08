@@ -4,6 +4,10 @@ import type {
   WakeRecord,
   WakeSchedule,
 } from "@/lib/types"
+import {
+  parseConversationTarget,
+  resolveWakeConversationId,
+} from "@/lib/wake-wire"
 import { formatClientTimezone } from "./wake-editor-utils"
 
 export type RegistryItemKind = "event_rule" | "wake"
@@ -93,5 +97,10 @@ export function wakeScheduleDescription(
 }
 
 export function wakeSourceConversationId(wake: WakeRecord): number | null {
-  return wake.target_conversation_id ?? null
+  return resolveWakeConversationId({
+    target_conversation_id: wake.target_conversation_id,
+    target: wake.target,
+  })
 }
+
+export { parseConversationTarget, resolveWakeConversationId }

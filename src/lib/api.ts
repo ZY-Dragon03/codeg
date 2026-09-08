@@ -15,6 +15,7 @@ import {
   DEFAULT_FORGE_PAGE_SIZE,
 } from "./forge-list-prefs"
 import { TurnBusyError, isTurnInProgressRejection } from "./turn-busy"
+import { resolveWakeConversationId } from "./wake-wire"
 import type { FolderThemeColor } from "./theme-presets"
 import type { FollowUpIntent } from "./task-follow-up"
 import type {
@@ -3480,23 +3481,31 @@ export async function eventRuleListLogs(params: {
 type LegacyWakeRecord = {
   id: number
   source_conversation_id?: number | null
+  sourceConversationId?: number | null
   creator_kind?: string | null
+  creatorKind?: string | null
   creator_id?: string | null
+  creatorId?: string | null
   source_connection_id?: string | null
   terminal_id?: string | null
   process_ref?: string | null
   trigger_kind?: string | null
+  triggerKind?: string | null
   fire_at?: string | null
+  fireAt?: string | null
   prompt?: string | null
   status?: string | null
   error?: string | null
   created_at?: string | null
+  createdAt?: string | null
   updated_at?: string | null
+  updatedAt?: string | null
   schedule?: WakeRecord["schedule"] | null
   name?: string | null
   enabled?: boolean
   target?: string | null
   target_conversation_id?: number | null
+  targetConversationId?: number | null
   description?: string | null
   provenance?: string
   creator?: string | null
@@ -3508,9 +3517,10 @@ type LegacyWakeRecord = {
  * name, or target fields. */
 function normalizeLegacyWake(wake: WakeRecord | LegacyWakeRecord): WakeRecord {
   const raw = wake as LegacyWakeRecord
-  const createdAt = raw.created_at ?? new Date(0).toISOString()
-  const fireAt = raw.fire_at ?? null
-  const triggerKind = raw.trigger_kind ?? "process_exit"
+  const createdAt =
+    raw.created_at ?? raw.createdAt ?? new Date(0).toISOString()
+  const fireAt = raw.fire_at ?? raw.fireAt ?? null
+  const triggerKind = raw.trigger_kind ?? raw.triggerKind ?? "process_exit"
   const existingSchedule = raw.schedule ?? null
   const schedule = existingSchedule ?? (triggerKind === "timer_after"
     ? {
@@ -3525,8 +3535,10 @@ function normalizeLegacyWake(wake: WakeRecord | LegacyWakeRecord): WakeRecord {
           kind: "process_exit" as const,
           process_id: raw.process_ref ?? raw.terminal_id ?? null,
         })
-  const targetConversationId = raw.target_conversation_id ?? raw.source_conversation_id ?? null
-  const provenance = raw.provenance ?? raw.creator_kind ?? "user"
+  const targetConversationId = resolveWakeConversationId(raw)
+  const provenance =
+    raw.provenance ?? raw.creator_kind ?? raw.creatorKind ?? "user"
+  const creatorId = raw.creator_id ?? raw.creatorId ?? null
   return {
     id: raw.id,
     name: raw.name ?? raw.prompt ?? `Wake #${raw.id}`,
@@ -3537,10 +3549,11 @@ function normalizeLegacyWake(wake: WakeRecord | LegacyWakeRecord): WakeRecord {
     target: raw.target ?? (targetConversationId == null ? null : `conversation:${targetConversationId}`),
     target_conversation_id: targetConversationId,
     description: raw.description ?? "one-shot wake",
-    creator: raw.creator ?? (raw.creator_id == null ? null : `agent:${raw.creator_id}`),
+    creator: raw.creator ?? (creatorId == null ? null : `agent:${creatorId}`),
     provenance,
-    created_at: raw.created_at ?? undefined,
-    updated_at: raw.updated_at ?? undefined,
+    error: raw.error ?? null,
+    created_at: raw.created_at ?? raw.createdAt ?? undefined,
+    updated_at: raw.updated_at ?? raw.updatedAt ?? undefined,
     cancelled_at: null,
   }
 }

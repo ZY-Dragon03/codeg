@@ -236,9 +236,9 @@ export function AutomationRegistryPanel({
         return scope.agent_type === agentType
       }
       const wake = item as WakeRecord
+      const wakeConversationId = wakeSourceConversationId(wake)
       return (
-        wake.target_conversation_id == null ||
-        wake.target_conversation_id === conversationId
+        wakeConversationId == null || wakeConversationId === conversationId
       )
     }
     return filtered.sort((a, b) => {
@@ -311,7 +311,9 @@ export function AutomationRegistryPanel({
       await wakeCreate(draft, conversationId)
       setNotice(t("registry.wakeSaved"))
     } else if (editingWake) {
-      await wakeUpdate(editingWake.wake.id, draft, conversationId)
+      const sourceId =
+        wakeSourceConversationId(editingWake.wake) ?? conversationId
+      await wakeUpdate(editingWake.wake.id, draft, sourceId)
       setNotice(
         isWakeTerminal(editingWake.wake)
           ? t("registry.wakeSavedAndRearmed")
@@ -769,14 +771,15 @@ function RegistryRow({
   const event = isRegistryEventRule(item)
   const wake = event ? null : (item as WakeRecord)
   const name = item.name || (event ? t("event") : t("wake"))
+  const wakeConversationId = wake ? wakeSourceConversationId(wake) : null
   const target = event
     ? item.config.action.target_conversation_ids
         ?.map(
           (id) => conversations.find((c) => c.id === id)?.title ?? `#${id}`
         )
         .join(", ")
-    : wake?.target_conversation_id
-      ? conversationsLabel(wake.target_conversation_id, conversations)
+    : wakeConversationId
+      ? conversationsLabel(wakeConversationId, conversations)
       : wake?.target
   const applicable = event
     ? item.config.scope.kind === "global" ||
@@ -786,8 +789,7 @@ function RegistryRow({
         item.config.scope.folder_id === folderId) ||
       (item.config.scope.kind === "agent_type" &&
         item.config.scope.agent_type === agentType)
-    : wake?.target_conversation_id == null ||
-      wake.target_conversation_id === conversationId
+    : wakeConversationId == null || wakeConversationId === conversationId
   const scopeText = event
     ? item.config.scope.kind === "global"
       ? t("scopeGlobal")
@@ -807,7 +809,11 @@ function RegistryRow({
     }
     if (wake.status === "dispatching") return t("registry.wakeStatusDispatching")
     if (wake.status === "sent") return t("registry.wakeStatusSent")
-    if (wake.status === "failed") return t("registry.wakeStatusFailed")
+    if (wake.status === "failed") {
+      return wake.error
+        ? `${t("registry.wakeStatusFailed")} — ${wake.error}`
+        : t("registry.wakeStatusFailed")
+    }
     if (wake.status === "cancelled") return t("registry.wakeStatusCancelled")
     return wake.enabled ? t("registry.wakeStatusPending") : t("registry.wakeStatusCancelled")
   })()
@@ -857,7 +863,7 @@ function RegistryRow({
             {scopeText} · {scheduleText}
             {target ? ` · ${target}` : ""}
           </p>
-          {wake?.error && isWakeTerminal(wake) ? (
+          {wake?.error && wake.status !== "failed" && isWakeTerminal(wake) ? (
             <p className="mt-1 text-xs text-destructive">{wake.error}</p>
           ) : null}
           {wake && isWakeDispatching(wake) ? (

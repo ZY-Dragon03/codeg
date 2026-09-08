@@ -5798,7 +5798,7 @@
       "cancelWakeTitle": "取消这个唤醒？",
       "cancelWakeDescription": "取消后它将不会在本次条件满足时触发。",
       "cancelWakeConfirm": "确认取消",
-      "wakeCancelMissingTarget": "此唤醒没有可用于取消的目标会话。",
+      "wakeCancelMissingTarget": "目标会话不存在或唤醒数据已损坏。",
       "deleteEventRuleTitle": "删除自动化？",
       "deleteWakeTitle": "删除这个唤醒？",
       "deleteWakeDescription": "这会永久删除该记录。",
