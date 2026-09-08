@@ -70,6 +70,10 @@ import {
 } from "./active-session-details"
 import { SessionDetailsDialog } from "./session-details-dialog"
 import { AutomationRegistryPanel } from "@/components/automations/automation-registry-panel"
+import {
+  automationDialogBodyClass,
+  automationDialogContentClass,
+} from "@/components/automations/automation-dialog-layout"
 
 interface ConversationDetailHeaderProps {
   tabId: string
@@ -379,16 +383,18 @@ export const ConversationDetailHeader = memo(function ConversationDetailHeader({
         open={eventAutomationsOpen}
         onOpenChange={setEventAutomationsOpen}
       >
-        <DialogContent className="max-w-5xl">
-          <DialogHeader>
+        <DialogContent className={automationDialogContentClass}>
+          <DialogHeader className="shrink-0">
             <DialogTitle>{tEvent("registryTitle")}</DialogTitle>
           </DialogHeader>
-          <AutomationRegistryPanel
-            conversationId={conversationId}
-            folderId={folderId}
-            agentType={agentType}
-            dialog
-          />
+          <div className={automationDialogBodyClass}>
+            <AutomationRegistryPanel
+              conversationId={conversationId}
+              folderId={folderId}
+              agentType={agentType}
+              dialog
+            />
+          </div>
         </DialogContent>
       </Dialog>
 

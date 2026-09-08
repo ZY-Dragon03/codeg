@@ -13,7 +13,7 @@ export function AutomationSubpageHeader({
 }) {
   const t = useTranslations("EventAutomations")
   return (
-    <div className="border-b border-border/70 pb-4">
+    <div className="min-w-0">
       <Button
         type="button"
         variant="ghost"

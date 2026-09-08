@@ -164,6 +164,22 @@ The Wake editor MUST treat the display name as optional and auto-name empty user
 - **WHEN** a user enters `2026-09-08 09:30` in their local timezone
 - **THEN** the saved wake MUST fire at that local instant and reopening the editor MUST display the same local time with the current client timezone label
 
+### Requirement: Automation dialog layout MUST stay width-invariant
+
+The conversation-header automation dialog MUST use a fixed outer width that does not change when switching between the registry list, content-detection editor, completion-forwarding editor, or wake editor, including when changing triggers, radios, or selects inside those editors. Height MAY change with content; when content exceeds the viewport the dialog MUST scroll internally rather than resizing horizontally. Content width MUST NOT determine dialog width.
+
+Registry is the level-one surface inside the dialog. Content Detection, Completion Forwarding, and Wake editors are level-two subpages inside the registry and MUST render inside a distinct bordered, rounded, padded surface with a divider between the subpage header and form body. The outer dialog close control MUST dismiss the entire automation window; the inner back control MUST return to the registry list only.
+
+#### Scenario: Switching wake trigger modes
+
+- **WHEN** a user opens wake creation and switches among delay, scheduled time, and process-exit triggers
+- **THEN** only the subpage height MAY change while dialog width, subpage width, and form column width remain unchanged
+
+#### Scenario: Opening an event-rule subpage
+
+- **WHEN** a user opens content detection or completion forwarding from the registry
+- **THEN** the UI MUST show a back link to the registry list and the editor form inside a secondary surface rather than bare form fields in the dialog root
+
 #### Scenario: No running programs
 
 - **WHEN** no eligible running terminal exists for process-exit wake creation

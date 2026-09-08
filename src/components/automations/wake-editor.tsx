@@ -25,6 +25,10 @@ import { Textarea } from "@/components/ui/textarea"
 import { WakeProcessSelector } from "./wake-process-selector"
 import { AutomationSubpageHeader } from "./automation-subpage-header"
 import {
+  AutomationSubpageForm,
+  AutomationSubpageSurface,
+} from "./automation-dialog-layout"
+import {
   delayToMs,
   formatClientTimezone,
   isAutoWakeName,
@@ -212,9 +216,10 @@ export function WakeEditor({
   }
 
   return (
-    <div className="mx-auto flex max-w-xl flex-col gap-4 p-4">
+    <AutomationSubpageSurface data-testid="wake-editor">
       <AutomationSubpageHeader title={subpageTitle} onBack={onCancel} />
 
+      <AutomationSubpageForm>
       <div className="space-y-2">
         <Label htmlFor="wake-name">{t("wakeNameLabel")}</Label>
         <Input
@@ -285,6 +290,7 @@ export function WakeEditor({
             type="datetime-local"
             value={scheduledAt}
             onChange={(event) => setScheduledAt(event.target.value)}
+            className="w-full"
           />
           <p className="text-xs text-muted-foreground">
             {t("wakeTimezoneLabel", {
@@ -324,7 +330,7 @@ export function WakeEditor({
       <div className="space-y-2">
         <Label>{t("wakeTargetLabel")}</Label>
         <Select value={targetConversationId} onValueChange={setTargetConversationId}>
-          <SelectTrigger>
+          <SelectTrigger className="w-full">
             <SelectValue placeholder={t("wakeTargetPlaceholder")} />
           </SelectTrigger>
           <SelectContent>
@@ -351,6 +357,7 @@ export function WakeEditor({
           {t("editor.save")}
         </Button>
       </div>
-    </div>
+      </AutomationSubpageForm>
+    </AutomationSubpageSurface>
   )
 }

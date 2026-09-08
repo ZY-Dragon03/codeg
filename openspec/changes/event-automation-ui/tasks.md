@@ -21,6 +21,10 @@
 - [ ] 3.2 Desktop/Web 各完成无 API 辅助的创建编辑启停，真实触发自定义 prompt、scope 隔离、三次上限/冷却并保留证据（Web 已完成；Desktop visual interaction `NOT_PROVEN`）。
 - [ ] 3.3 重启验证模板配置、scheduled 回归；按 phase-1 design 八项裁定，不用 mock 代替实机（Web 已完成；Desktop restart `NOT_PROVEN`）。
 
+## 5. Automation dialog layout contract
+
+- [ ] 5.1 Fixed-width automation dialog with internal scroll; registry L1 and editor L2 subpage surfaces; width invariant across wake triggers and event-rule editors.
+
 ## 4. Fixed product model implementation
 
 - [x] 4.1 Implement menu search/stable sort and two creation types with no template-first flow.

@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-import { AutomationSubpageHeader } from "./automation-subpage-header"
+import { AutomationEditorShell } from "./automation-dialog-layout"
 
 export type EventRuleAutomationType =
   | "content_detection"
@@ -273,44 +273,39 @@ export function EventRuleEditor({
       )?.title || t("editor.selectConversation")
     : t("editor.sourceConversation")
 
+  const inSubpage = Boolean(subpageTitle && onCancel)
+  const enabledSwitch = (
+    <label className="flex items-center gap-2 text-sm">
+      {draft.enabled ? t("editor.enabled") : t("editor.disabled")}
+      <Switch
+        checked={draft.enabled}
+        onCheckedChange={(enabled) => update((d) => ({ ...d, enabled }))}
+        aria-label={
+          draft.enabled ? t("editor.enabled") : t("editor.disabled")
+        }
+      />
+    </label>
+  )
+
   return (
-    <div className="flex flex-col gap-5" data-testid="event-rule-editor">
-      {subpageTitle && onCancel ? (
-        <AutomationSubpageHeader title={subpageTitle} onBack={onCancel} />
-      ) : (
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold">{t("editor.title")}</h2>
-            <p className="text-sm text-muted-foreground">
-              {t("editor.description")}
-            </p>
+    <div className="w-full min-w-0" data-testid="event-rule-editor">
+      <AutomationEditorShell
+        inSubpage={inSubpage}
+        subpageTitle={subpageTitle}
+        onBack={onCancel}
+        standaloneHeader={
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">{t("editor.title")}</h2>
+              <p className="text-sm text-muted-foreground">
+                {t("editor.description")}
+              </p>
+            </div>
+            {enabledSwitch}
           </div>
-          <label className="flex items-center gap-2 text-sm">
-            {draft.enabled ? t("editor.enabled") : t("editor.disabled")}
-            <Switch
-              checked={draft.enabled}
-              onCheckedChange={(enabled) => update((d) => ({ ...d, enabled }))}
-              aria-label={
-                draft.enabled ? t("editor.enabled") : t("editor.disabled")
-              }
-            />
-          </label>
-        </div>
-      )}
-
-      {subpageTitle && onCancel ? (
-        <label className="flex items-center gap-2 text-sm">
-          {draft.enabled ? t("editor.enabled") : t("editor.disabled")}
-          <Switch
-            checked={draft.enabled}
-            onCheckedChange={(enabled) => update((d) => ({ ...d, enabled }))}
-            aria-label={
-              draft.enabled ? t("editor.enabled") : t("editor.disabled")
-            }
-          />
-        </label>
-      ) : null}
-
+        }
+        subpageToolbar={enabledSwitch}
+      >
       {error ? (
         <p
           role="alert"
@@ -1211,6 +1206,7 @@ export function EventRuleEditor({
           {saving ? t("editor.saving") : t("editor.save")}
         </Button>
       </div>
+      </AutomationEditorShell>
     </div>
   )
 }

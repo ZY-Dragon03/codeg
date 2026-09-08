@@ -24,6 +24,7 @@ import type {
   WakeRecord,
 } from "@/lib/types"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
+import { cn } from "@/lib/utils"
 import { onTransportReconnect } from "@/lib/platform"
 import {
   AlertDialog,
@@ -50,6 +51,7 @@ import {
   type EventRuleAutomationType,
 } from "./event-rule-editor"
 import { WakeEditor } from "./wake-editor"
+import { automationPanelScrollClass } from "./automation-dialog-layout"
 import {
   isRegistryEventRule,
   isRegistryWake,
@@ -335,7 +337,7 @@ export function AutomationRegistryPanel({
 
   if (editingRule) {
     return (
-      <div className="h-full overflow-auto px-1">
+      <div className={dialog ? automationPanelScrollClass : "h-full overflow-auto px-1"}>
         <EventRuleEditor
           rule={editingRule === "new" ? null : editingRule}
           initialScope={editingRule === "new" ? initialScope : undefined}
@@ -360,7 +362,8 @@ export function AutomationRegistryPanel({
 
   if (editingWake) {
     return (
-      <WakeEditor
+      <div className={dialog ? automationPanelScrollClass : undefined}>
+        <WakeEditor
         wake={editingWake === "new" ? null : editingWake}
         defaultTargetConversationId={conversationId}
         conversations={conversations}
@@ -370,12 +373,16 @@ export function AutomationRegistryPanel({
         onSubmit={saveWake}
         onCancel={() => setEditingWake(null)}
       />
+      </div>
     )
   }
 
   return (
     <div
-      className="flex h-full min-h-0 flex-col gap-4"
+      className={cn(
+        "flex h-full min-h-0 w-full min-w-0 flex-col gap-4",
+        dialog && automationPanelScrollClass
+      )}
       data-testid="automation-registry-panel"
     >
       {!dialog ? (
