@@ -216,9 +216,8 @@ export function EventRuleEditor({
   const [error, setError] = useState<string | null>(null)
   const [sampleText, setSampleText] = useState("")
   const [sampleErrorKind, setSampleErrorKind] = useState("")
-  const [sampleConversationId, setSampleConversationId] = useState<number>(
+  const sampleConversationId =
     initialScope?.kind === "conversation" ? initialScope.conversation_id : 0
-  )
   const [preview, setPreview] = useState<EventRulePreview | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState(() =>
     needsAdvanced(

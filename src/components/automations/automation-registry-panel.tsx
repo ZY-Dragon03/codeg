@@ -577,7 +577,9 @@ export function AutomationRegistryPanel({
               onRequestDeleteWake={(wake) => setPendingDeleteWake(wake)}
               onToggleEnabled={(rule, enabled) =>
                 void runAction(
-                  () => eventRuleSetEnabled(rule.id, enabled),
+                  async () => {
+                    await eventRuleSetEnabled(rule.id, enabled)
+                  },
                   { successMessage: t("registry.ruleUpdated") }
                 )
               }
