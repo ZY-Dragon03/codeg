@@ -39,6 +39,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -118,9 +124,6 @@ export function AutomationRegistryPanel({
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [pendingDeleteRule, setPendingDeleteRule] = useState<EventRule | null>(
-    null
-  )
-  const [pendingCancelWake, setPendingCancelWake] = useState<WakeRecord | null>(
     null
   )
   const [pendingDeleteWake, setPendingDeleteWake] = useState<WakeRecord | null>(
@@ -484,46 +487,27 @@ export function AutomationRegistryPanel({
           </SelectContent>
         </Select>
         {dialog ? (
-          <div className="relative">
-            <Button size="sm" onClick={() => setAddMenuOpen((open) => !open)}>
-              <Plus className="size-4" />
-              {t("registryAddCustom")}
-            </Button>
-            {addMenuOpen ? (
-              <div className="absolute right-0 top-full z-10 mt-1 grid min-w-48 gap-1 rounded-xl border bg-background p-1 shadow-lg">
-                <Button
-                  variant="ghost"
-                  className="justify-start"
-                  onClick={() => {
-                    setAddMenuOpen(false)
-                    openNewRule("content_detection")
-                  }}
-                >
-                  {t("editor.contentDetection")}
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="justify-start"
-                  onClick={() => {
-                    setAddMenuOpen(false)
-                    openNewRule("forward_after_task_completion")
-                  }}
-                >
-                  {t("editor.forwardAfterCompletion")}
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="justify-start"
-                  onClick={() => {
-                    setAddMenuOpen(false)
-                    setEditingWake("new")
-                  }}
-                >
-                  {t("newWake")}
-                </Button>
-              </div>
-            ) : null}
-          </div>
+          <DropdownMenu open={addMenuOpen} onOpenChange={setAddMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm">
+                <Plus className="size-4" />
+                {t("registryAddCustom")}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" sideOffset={6} className="w-56">
+              <DropdownMenuItem onSelect={() => openNewRule("content_detection")}>
+                {t("editor.contentDetection")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => openNewRule("forward_after_task_completion")}
+              >
+                {t("editor.forwardAfterCompletion")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setEditingWake("new")}>
+                {t("newWake")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : (
           <>
             <Button size="sm" onClick={() => openNewRule("content_detection")}>
@@ -587,7 +571,15 @@ export function AutomationRegistryPanel({
               }
               onToggleWake={(wake, checked) => {
                 if (!checked && isWakeActive(wake)) {
-                  setPendingCancelWake(wake)
+                  const sourceId = wakeSourceConversationId(wake)
+                  if (!sourceId) {
+                    setError(t("registry.wakeCancelMissingTarget"))
+                    return
+                  }
+                  void runAction(
+                    () => wakeCancel(wake.id, sourceId),
+                    { successMessage: t("registry.wakeCancelled") }
+                  )
                   return
                 }
                 if (checked && isWakeTerminal(wake)) {
@@ -655,43 +647,6 @@ export function AutomationRegistryPanel({
               }}
             >
               {t("delete")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog
-        open={pendingCancelWake != null}
-        onOpenChange={(open) => {
-          if (!open) setPendingCancelWake(null)
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("registry.cancelWakeTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("registry.cancelWakeDescription")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("editor.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                const wake = pendingCancelWake
-                setPendingCancelWake(null)
-                if (!wake) return
-                const sourceId = wakeSourceConversationId(wake)
-                if (!sourceId) {
-                  setError(t("registry.wakeCancelMissingTarget"))
-                  return
-                }
-                void runAction(
-                  () => wakeCancel(wake.id, sourceId),
-                  { successMessage: t("registry.wakeCancelled") }
-                )
-              }}
-            >
-              {t("registry.cancelWakeConfirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

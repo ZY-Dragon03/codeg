@@ -10,6 +10,7 @@ import type {
   WakeSchedule,
 } from "@/lib/types"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
+import { normalizeWakePrompt } from "@/lib/wake-prompt"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -219,7 +220,7 @@ export function WakeEditor({
           scheduledAt,
           processTerminalId
         ),
-        prompt: prompt.trim(),
+        prompt: normalizeWakePrompt(prompt),
         target_conversation_id: targetId,
         enabled: true,
       })
@@ -347,6 +348,7 @@ export function WakeEditor({
           placeholder={t("wakePromptPlaceholder")}
           rows={4}
         />
+        <p className="text-xs text-muted-foreground">{t("wakePromptHint")}</p>
       </div>
 
       <div className="space-y-2">

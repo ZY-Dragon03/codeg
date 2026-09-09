@@ -260,5 +260,13 @@ describe("automationRegistryList compatibility", () => {
     expect(created.source_conversation_id).toBe(42)
     expect(created.target_conversation_id).toBe(42)
     expect(updated.source_conversation_id).toBe(42)
+
+    await wakeCreate({ ...draft, prompt: "  \n  " }, 42)
+    expect(mocks.call).toHaveBeenLastCalledWith("wake_create", {
+      draft: expect.objectContaining({
+        sourceConversationId: 42,
+        prompt: "继续",
+      }),
+    })
   })
 })

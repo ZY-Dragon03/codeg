@@ -14,6 +14,7 @@ import {
   validateWakeDraft,
 } from "./wake-editor-utils"
 import type { TerminalInfo } from "@/lib/types"
+import { normalizeWakePrompt } from "@/lib/wake-prompt"
 
 describe("wake-editor-utils", () => {
   it("converts delay units to milliseconds", () => {
@@ -88,6 +89,12 @@ describe("wake-editor-utils", () => {
         prompt: "go",
       })
     ).toBe("processRequired")
+  })
+
+  it("defaults an empty wake prompt without pre-filling the editor", () => {
+    expect(normalizeWakePrompt("")).toBe("继续")
+    expect(normalizeWakePrompt("  \n\t")).toBe("继续")
+    expect(normalizeWakePrompt("check in")).toBe("check in")
   })
 
   it("filters and sorts terminals for wake selection", () => {

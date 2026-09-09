@@ -19,6 +19,7 @@ import {
   resolveWakeConversationId,
   resolveWakeSourceConversationId,
 } from "./wake-wire"
+import { normalizeWakePrompt } from "./wake-prompt"
 import type { FolderThemeColor } from "./theme-presets"
 import type { FollowUpIntent } from "./task-follow-up"
 import type {
@@ -3669,7 +3670,7 @@ function toWakeBackendDraft(
       triggerKind: "timer_after",
       fireAt: new Date(Date.now() + schedule.delay_ms).toISOString(),
       delayMs: schedule.delay_ms,
-      prompt: draft.prompt?.trim() ?? "",
+      prompt: normalizeWakePrompt(draft.prompt),
       displayName,
       creatorKind: "user",
       creatorId: null,
@@ -3684,7 +3685,7 @@ function toWakeBackendDraft(
       triggerKind: "timer_at",
       fireAt: new Date(schedule.at).toISOString(),
       delayMs: null,
-      prompt: draft.prompt?.trim() ?? "",
+      prompt: normalizeWakePrompt(draft.prompt),
       displayName,
       creatorKind: "user",
       creatorId: null,
@@ -3698,7 +3699,7 @@ function toWakeBackendDraft(
     triggerKind: "process_exit",
     fireAt: null,
     delayMs: null,
-    prompt: draft.prompt?.trim() ?? "",
+    prompt: normalizeWakePrompt(draft.prompt),
     displayName,
     creatorKind: "user",
     creatorId: null,

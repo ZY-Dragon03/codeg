@@ -5633,7 +5633,8 @@
     "wakeTargetLabel": "Target conversation",
     "wakeTargetPlaceholder": "Choose a conversation",
     "wakePromptLabel": "Message to send when the wake fires",
-    "wakePromptPlaceholder": "Message to send when the wake fires",
+    "wakePromptPlaceholder": "Leave blank to send “Continue”",
+    "wakePromptHint": "Leave blank to send “Continue”.",
     "wakeValidation": {
       "delayRequired": "Enter a delay amount.",
       "delayPositive": "Delay must be greater than zero.",

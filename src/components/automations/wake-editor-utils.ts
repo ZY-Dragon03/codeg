@@ -179,7 +179,6 @@ export function validateWakeDraft(input: {
   prompt: string
   now?: Date
 }): WakeValidationErrorKey | null {
-  if (!input.prompt.trim()) return "promptRequired"
   if (input.kind === "after") {
     const amount = Number(input.delayAmount)
     if (!input.delayAmount.trim()) return "delayRequired"

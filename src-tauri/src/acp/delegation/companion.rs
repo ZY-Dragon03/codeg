@@ -754,7 +754,14 @@ async fn build_tools_call_spawn(
                 Box::pin(
                     async move { client_send_to_conversation_round_trip(&socket, &req).await },
                 );
-            register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
+            register_and_spawn(
+                inflight,
+                id,
+                None,
+                round_trip,
+                render_event_automation_result,
+            )
+            .await
         }
         "read_conversation_context" => {
             let Some(conversation_id) = arguments
@@ -776,7 +783,14 @@ async fn build_tools_call_spawn(
             let round_trip = Box::pin(async move {
                 client_read_conversation_context_round_trip(&socket, &req).await
             });
-            register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
+            register_and_spawn(
+                inflight,
+                id,
+                None,
+                round_trip,
+                render_event_automation_result,
+            )
+            .await
         }
         "wake_after" | "wake_at" | "wake_on_process_exit" => {
             let Some(prompt) = arguments
@@ -823,7 +837,14 @@ async fn build_tools_call_spawn(
                 prompt: prompt.to_owned(),
             };
             let round_trip = Box::pin(async move { client_wake_round_trip(&socket, &req).await });
-            register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
+            register_and_spawn(
+                inflight,
+                id,
+                None,
+                round_trip,
+                render_event_automation_result,
+            )
+            .await
         }
         "create_terminal" => {
             let Some(command) = arguments
@@ -885,7 +906,14 @@ async fn build_tools_call_spawn(
             };
             let round_trip =
                 Box::pin(async move { client_list_wakes_round_trip(&socket, &req).await });
-            register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
+            register_and_spawn(
+                inflight,
+                id,
+                None,
+                round_trip,
+                render_event_automation_result,
+            )
+            .await
         }
         "cancel_wake" => {
             let Some(wake_id) = arguments
@@ -905,7 +933,14 @@ async fn build_tools_call_spawn(
             };
             let round_trip =
                 Box::pin(async move { client_cancel_wake_round_trip(&socket, &req).await });
-            register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
+            register_and_spawn(
+                inflight,
+                id,
+                None,
+                round_trip,
+                render_event_automation_result,
+            )
+            .await
         }
         "create_event_automation" => {
             let draft = match serde_json::from_value(arguments.clone()) {
@@ -926,7 +961,14 @@ async fn build_tools_call_spawn(
                 Box::pin(
                     async move { client_create_event_automation_round_trip(&socket, &req).await },
                 );
-            register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
+            register_and_spawn(
+                inflight,
+                id,
+                None,
+                round_trip,
+                render_event_automation_result,
+            )
+            .await
         }
         "list_event_automations" => {
             let req = BrokerListEventAutomationsRequest {
@@ -936,7 +978,14 @@ async fn build_tools_call_spawn(
                 Box::pin(
                     async move { client_list_event_automations_round_trip(&socket, &req).await },
                 );
-            register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
+            register_and_spawn(
+                inflight,
+                id,
+                None,
+                round_trip,
+                render_event_automation_result,
+            )
+            .await
         }
         "update_event_automation" => {
             let Some(id_value) = arguments.get("id").and_then(Value::as_i64) else {
@@ -970,7 +1019,14 @@ async fn build_tools_call_spawn(
                 Box::pin(
                     async move { client_update_event_automation_round_trip(&socket, &req).await },
                 );
-            register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
+            register_and_spawn(
+                inflight,
+                id,
+                None,
+                round_trip,
+                render_event_automation_result,
+            )
+            .await
         }
         "delete_or_cancel_event_automation" => {
             let Some(id_value) = arguments.get("id").and_then(Value::as_i64) else {
@@ -991,7 +1047,14 @@ async fn build_tools_call_spawn(
             let round_trip = Box::pin(async move {
                 client_delete_or_cancel_event_automation_round_trip(&socket, &req).await
             });
-            register_and_spawn(inflight, id, None, round_trip, render_passthrough).await
+            register_and_spawn(
+                inflight,
+                id,
+                None,
+                round_trip,
+                render_event_automation_result,
+            )
+            .await
         }
         "task_progress" => {
             let message = arguments
@@ -1683,11 +1746,19 @@ pub fn render_session_result(outcome: &Value) -> Value {
     })
 }
 
-/// New event-automation tools already return a structured JSON envelope from
-/// the broker. Keep that envelope intact for MCP clients that understand the
-/// target/receipt fields.
-pub fn render_passthrough(outcome: &Value) -> Value {
-    outcome.clone()
+/// Render every event-automation broker outcome as an MCP `CallToolResult`.
+///
+/// The broker outcome remains intact in `structuredContent` so clients can
+/// consume wake/target/authorization/receipt fields. The JSON text fallback
+/// keeps the complete result available to MCP hosts that only preserve
+/// `content`, while `isError` follows the broker's explicit `ok: false` bit.
+pub fn render_event_automation_result(outcome: &Value) -> Value {
+    let text = serde_json::to_string(outcome).unwrap_or_else(|_| outcome.to_string());
+    json!({
+        "content": [{ "type": "text", "text": text }],
+        "isError": outcome.get("ok").and_then(Value::as_bool) == Some(false),
+        "structuredContent": outcome.clone(),
+    })
 }
 
 /// Render the authoritative terminal/create response as a regular MCP
@@ -2307,6 +2378,93 @@ mod tests {
             rendered["content"][0]["text"],
             "Result no longer cached; open child session 7 for the full output."
         );
+    }
+
+    fn assert_event_automation_call_result(
+        response: &JsonRpcResponse,
+        expected_error: bool,
+        expected_outcome: &Value,
+    ) {
+        let result = response.result.as_ref().expect("tools/call result");
+        assert!(result["content"].is_array());
+        assert_eq!(result["content"][0]["type"], "text");
+        assert!(result["content"][0]["text"].is_string());
+        assert_eq!(result["isError"], expected_error);
+        assert_eq!(&result["structuredContent"], expected_outcome);
+    }
+
+    #[test]
+    fn wake_after_success_renders_standard_mcp_call_result() {
+        let outcome = json!({
+            "ok": true,
+            "wake": { "id": 17, "status": "pending" },
+            "target": { "conversation_id": 4 },
+            "message_id": "wake-17"
+        });
+        let response = ok(json!(1), render_event_automation_result(&outcome));
+        assert_event_automation_call_result(&response, false, &outcome);
+    }
+
+    #[test]
+    fn wake_failure_renders_error_flag_without_dropping_structured_outcome() {
+        let outcome = json!({
+            "ok": false,
+            "error": "target_unavailable",
+            "target": { "conversation_id": 4 },
+            "authorization": { "allowed": false }
+        });
+        let response = ok(json!(2), render_event_automation_result(&outcome));
+        assert_event_automation_call_result(&response, true, &outcome);
+    }
+
+    #[tokio::test]
+    async fn tools_call_round_trip_uses_standard_event_result_renderer() {
+        let outcome = json!({
+            "ok": true,
+            "wake": { "id": 18, "status": "pending" },
+            "receipts": [{ "kind": "wake_created" }]
+        });
+        let round_trip = Box::pin(async move { Ok(BrokerResponse { outcome }) });
+        let action = register_and_spawn(
+            Arc::new(InflightCalls::new()),
+            json!(3),
+            None,
+            round_trip,
+            render_event_automation_result,
+        )
+        .await;
+        let LineAction::Spawn(call) = action else {
+            panic!("event automation tools/call must spawn a broker round-trip");
+        };
+        let spawned = call.future.await;
+        let response = spawned.response.expect("successful broker response");
+        assert_event_automation_call_result(
+            &response,
+            false,
+            &json!({
+                "ok": true,
+                "wake": { "id": 18, "status": "pending" },
+                "receipts": [{ "kind": "wake_created" }]
+            }),
+        );
+    }
+
+    #[test]
+    fn shared_event_automation_tools_keep_standard_call_result_shape() {
+        for (tool, outcome) in [
+            (
+                "send_to_conversation",
+                json!({ "ok": true, "message_id": "m-1" }),
+            ),
+            (
+                "read_conversation_context",
+                json!({ "ok": true, "conversation": { "id": 4 } }),
+            ),
+            ("list_wakes", json!({ "ok": true, "wakes": [] })),
+        ] {
+            let response = ok(json!(tool), render_event_automation_result(&outcome));
+            assert_event_automation_call_result(&response, false, &outcome);
+        }
     }
 
     // -- Batch get_delegation_status normalization + rendering -------------
