@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   parseConversationTarget,
   resolveWakeConversationId,
+  resolveWakeSourceConversationId,
 } from "@/lib/wake-wire"
 
 describe("wake-wire", () => {
@@ -42,5 +43,15 @@ describe("wake-wire", () => {
         target: "conversation:88",
       })
     ).toBe(88)
+  })
+
+  it("prefers the persisted source over a legacy target alias", () => {
+    expect(
+      resolveWakeSourceConversationId({
+        sourceConversationId: 42,
+        targetConversationId: 99,
+        target: "conversation:99",
+      })
+    ).toBe(42)
   })
 })

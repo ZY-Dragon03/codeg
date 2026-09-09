@@ -15,7 +15,10 @@ import {
   DEFAULT_FORGE_PAGE_SIZE,
 } from "./forge-list-prefs"
 import { TurnBusyError, isTurnInProgressRejection } from "./turn-busy"
-import { resolveWakeConversationId } from "./wake-wire"
+import {
+  resolveWakeConversationId,
+  resolveWakeSourceConversationId,
+} from "./wake-wire"
 import type { FolderThemeColor } from "./theme-presets"
 import type { FollowUpIntent } from "./task-follow-up"
 import type {
@@ -3535,6 +3538,7 @@ function normalizeLegacyWake(wake: WakeRecord | LegacyWakeRecord): WakeRecord {
           kind: "process_exit" as const,
           process_id: raw.process_ref ?? raw.terminal_id ?? null,
         })
+  const sourceConversationId = resolveWakeSourceConversationId(raw)
   const targetConversationId = resolveWakeConversationId(raw)
   const provenance =
     raw.provenance ?? raw.creator_kind ?? raw.creatorKind ?? "user"
@@ -3546,6 +3550,7 @@ function normalizeLegacyWake(wake: WakeRecord | LegacyWakeRecord): WakeRecord {
     status: raw.status ?? null,
     schedule,
     prompt: raw.prompt ?? null,
+    source_conversation_id: sourceConversationId,
     target: raw.target ?? (targetConversationId == null ? null : `conversation:${targetConversationId}`),
     target_conversation_id: targetConversationId,
     description: raw.description ?? "one-shot wake",
@@ -3646,7 +3651,10 @@ function toWakeBackendDraft(
   draft: WakeDraft,
   sourceConversationId?: number | null
 ): WakeBackendDraft {
-  const source = draft.target_conversation_id ?? sourceConversationId
+  // The persisted owner is authoritative for existing wakes. The editable
+  // target field is only a legacy creation input and must never change which
+  // row a management call is scoped to.
+  const source = sourceConversationId ?? draft.target_conversation_id
   if (!source || source <= 0) {
     throw new Error("A target conversation is required for a wake")
   }
@@ -3700,57 +3708,70 @@ function toWakeBackendDraft(
 export async function wakeList(
   sourceConversationId?: number | null
 ): Promise<WakeRecord[]> {
-  return getTransport().call("wake_list", {
+  const rows = await getTransport().call<LegacyWakeRecord[]>("wake_list", {
     sourceConversationId: sourceConversationId ?? 0,
   })
+  return rows.map((wake) => normalizeLegacyWake(wake))
 }
 export async function wakeCreate(
   draft: WakeDraft,
   sourceConversationId?: number | null
 ): Promise<WakeRecord> {
-  return getTransport().call("wake_create", {
+  const wake = await getTransport().call<LegacyWakeRecord>("wake_create", {
     draft: toWakeBackendDraft(draft, sourceConversationId),
   })
+  return normalizeLegacyWake(wake)
 }
 export async function wakeUpdate(
   id: number,
   draft: WakeDraft,
-  sourceConversationId?: number | null
+  sourceConversationId: number
 ): Promise<WakeRecord> {
-  return getTransport().call("wake_update", {
+  const wake = await getTransport().call<LegacyWakeRecord>("wake_update", {
     id,
-    sourceConversationId: draft.target_conversation_id ?? sourceConversationId,
+    sourceConversationId,
     draft: toWakeBackendDraft(draft, sourceConversationId),
   })
+  return normalizeLegacyWake(wake)
 }
 export async function wakeCancel(
   id: number,
-  sourceConversationId?: number | null
+  sourceConversationId: number
 ): Promise<void> {
+  if (sourceConversationId <= 0) {
+    throw new Error("Wake source conversation is required")
+  }
   return getTransport().call("wake_cancel", {
     id,
-    sourceConversationId: sourceConversationId ?? 0,
+    sourceConversationId,
   })
 }
 
 export async function wakeDelete(
   id: number,
-  sourceConversationId?: number | null
+  sourceConversationId: number
 ): Promise<void> {
+  if (sourceConversationId <= 0) {
+    throw new Error("Wake source conversation is required")
+  }
   return getTransport().call("wake_delete", {
     id,
-    sourceConversationId: sourceConversationId ?? 0,
+    sourceConversationId,
   })
 }
 
 export async function wakeRearm(
   id: number,
-  sourceConversationId?: number | null
+  sourceConversationId: number
 ): Promise<WakeRecord> {
-  return getTransport().call("wake_rearm", {
+  if (sourceConversationId <= 0) {
+    throw new Error("Wake source conversation is required")
+  }
+  const wake = await getTransport().call<LegacyWakeRecord>("wake_rearm", {
     id,
-    sourceConversationId: sourceConversationId ?? 0,
+    sourceConversationId,
   })
+  return normalizeLegacyWake(wake)
 }
 
 // Work tasks

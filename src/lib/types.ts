@@ -1651,7 +1651,10 @@ export interface WakeRecord {
   status?: string | null
   schedule: WakeSchedule
   prompt?: string | null
+  /** Persisted conversation that owns and created this wake. */
+  source_conversation_id?: number | null
   target?: string | null
+  /** Legacy registry alias retained for older payloads. */
   target_conversation_id?: number | null
   description?: string | null
   creator?: string | null

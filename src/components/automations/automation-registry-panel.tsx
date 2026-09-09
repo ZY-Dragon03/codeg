@@ -311,8 +311,10 @@ export function AutomationRegistryPanel({
       await wakeCreate(draft, conversationId)
       setNotice(t("registry.wakeSaved"))
     } else if (editingWake) {
-      const sourceId =
-        wakeSourceConversationId(editingWake.wake) ?? conversationId
+      const sourceId = wakeSourceConversationId(editingWake.wake)
+      if (!sourceId) {
+        throw new Error(t("registry.wakeCancelMissingTarget"))
+      }
       await wakeUpdate(editingWake.wake.id, draft, sourceId)
       setNotice(
         isWakeTerminal(editingWake.wake)

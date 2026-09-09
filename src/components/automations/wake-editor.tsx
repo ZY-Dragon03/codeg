@@ -28,7 +28,7 @@ import {
   AutomationSubpageForm,
   AutomationSubpageSurface,
 } from "./automation-dialog-layout"
-import { resolveWakeConversationId } from "@/lib/wake-wire"
+import { resolveWakeSourceConversationId } from "@/lib/wake-wire"
 import {
   delayToMs,
   formatClientTimezone,
@@ -119,7 +119,8 @@ export function WakeEditor({
   )
   const preferredFolderPath = useMemo(() => {
     const conversationId =
-      resolveWakeConversationId({
+      resolveWakeSourceConversationId({
+        source_conversation_id: wake?.source_conversation_id,
         target_conversation_id: wake?.target_conversation_id,
         target: wake?.target,
       }) ?? defaultTargetConversationId
@@ -144,7 +145,8 @@ export function WakeEditor({
   )
   const [targetConversationId, setTargetConversationId] = useState(() =>
     String(
-      resolveWakeConversationId({
+      resolveWakeSourceConversationId({
+        source_conversation_id: wake?.source_conversation_id,
         target_conversation_id: wake?.target_conversation_id,
         target: wake?.target,
       }) ?? defaultTargetConversationId ?? ""
@@ -349,7 +351,11 @@ export function WakeEditor({
 
       <div className="space-y-2">
         <Label>{t("wakeTargetLabel")}</Label>
-        <Select value={targetConversationId} onValueChange={setTargetConversationId}>
+        <Select
+          value={targetConversationId}
+          onValueChange={setTargetConversationId}
+          disabled={wake != null}
+        >
           <SelectTrigger className="w-full">
             <SelectValue placeholder={t("wakeTargetPlaceholder")} />
           </SelectTrigger>

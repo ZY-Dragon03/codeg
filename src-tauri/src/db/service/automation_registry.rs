@@ -28,6 +28,9 @@ pub struct AutomationRegistryItem {
     pub applicable: Option<bool>,
     pub priority: Option<i32>,
     pub config: Option<EventRuleConfig>,
+    /// Persisted owner of a wake. This is separate from the legacy target
+    /// alias so clients never have to infer which conversation scopes CRUD.
+    pub source_conversation_id: Option<i32>,
     pub target_conversation_id: Option<i32>,
     pub target: Option<String>,
     pub trigger_kind: String,
@@ -92,6 +95,7 @@ fn rule_item(row: event_rule::Model) -> Result<AutomationRegistryItem, DbError> 
         applicable: None,
         priority: Some(row.priority),
         config: Some(config),
+        source_conversation_id: None,
         target_conversation_id: None,
         target: None,
         trigger_kind: "lifecycle_event".into(),
@@ -160,6 +164,7 @@ fn wake_item(row: agent_wake::Model) -> AutomationRegistryItem {
         applicable: None,
         priority: None,
         config: None,
+        source_conversation_id: Some(row.source_conversation_id),
         target_conversation_id: Some(row.source_conversation_id),
         target: Some(format!("conversation:{}", row.source_conversation_id)),
         trigger_kind: row.trigger_kind.clone(),
@@ -206,7 +211,14 @@ mod tests {
         let items = list(&db.conn).await.unwrap();
         let wake = items.iter().find(|item| item.kind == "wake").unwrap();
         assert_eq!(wake.creator_kind, "agent");
+        assert_eq!(wake.source_conversation_id, Some(conversation));
         assert_eq!(wake.target_conversation_id, Some(conversation));
         assert_eq!(wake.item_type, "wake");
+
+        let json = serde_json::to_value(wake).unwrap();
+        assert_eq!(json["type"], "wake");
+        assert_eq!(json["sourceConversationId"], conversation);
+        assert_eq!(json["targetConversationId"], conversation);
+        assert!(json.get("source_conversation_id").is_none());
     }
 }

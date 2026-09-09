@@ -13,12 +13,14 @@ vi.mock("@/lib/transport", () => ({
   notifyRemoteDesktopUnauthorized: vi.fn(),
 }))
 
-import {
-  automationRegistryList,
-  wakeCancel,
-  wakeDelete,
-  wakeRearm,
-} from "@/lib/api"
+import {
+  automationRegistryList,
+  wakeCancel,
+  wakeCreate,
+  wakeDelete,
+  wakeRearm,
+  wakeUpdate,
+} from "@/lib/api"
 import { wakeSourceConversationId } from "@/components/automations/registry-item-utils"
 import type { WakeRecord } from "@/lib/types"
 
@@ -37,8 +39,9 @@ function backendRegistryWake(overrides: Record<string, unknown> = {}) {
     creator: null,
     applicable: null,
     priority: null,
-    config: null,
-    targetConversationId: 42,
+    config: null,
+    sourceConversationId: 42,
+    targetConversationId: 42,
     target: "conversation:42",
     triggerKind: "timer_after",
     fireAt: "2026-09-09T12:01:00.000Z",
@@ -90,7 +93,7 @@ describe("automationRegistryList compatibility", () => {
       target: "conversation:42",
       target_conversation_id: 42,
     })
-    expect(wake.schedule).toEqual({ kind: "after", delay_ms: 5000 })
+    expect((wake as WakeRecord).schedule).toEqual({ kind: "after", delay_ms: 5000 })
   })
 
   it("normalizes camelCase registry wake rows from the backend", async () => {
@@ -105,9 +108,10 @@ describe("automationRegistryList compatibility", () => {
 
     expect(wake).toMatchObject({
       id: 11,
-      type: "wake",
-      status: "pending",
-      target_conversation_id: 42,
+      type: "wake",
+      status: "pending",
+      source_conversation_id: 42,
+      target_conversation_id: 42,
       target: "conversation:42",
       error: null,
     })
@@ -133,8 +137,8 @@ describe("automationRegistryList compatibility", () => {
     expect(wake).toMatchObject({
       status: "failed",
       error: "conversation not connected",
-      target_conversation_id: 42,
-    })
+      target_conversation_id: 42,
+    })
   })
 
   it("routes wake management calls with the normalized conversation id", async () => {
@@ -151,12 +155,14 @@ describe("automationRegistryList compatibility", () => {
     })
 
     const [wake] = await automationRegistryList()
-    const sourceId = wakeSourceConversationId(wake as WakeRecord)
-    expect(sourceId).toBe(42)
+    const wakeRecord = wake as WakeRecord
+    const sourceId = wakeSourceConversationId(wakeRecord)
+    expect(sourceId).toBe(42)
+    if (sourceId == null) throw new Error("wake source conversation missing")
 
-    await wakeCancel(wake.id, sourceId)
-    await wakeDelete(wake.id, sourceId)
-    await wakeRearm(wake.id, sourceId)
+    await wakeCancel(wakeRecord.id, sourceId)
+    await wakeDelete(wakeRecord.id, sourceId)
+    await wakeRearm(wakeRecord.id, sourceId)
 
     expect(mocks.call).toHaveBeenCalledWith("wake_cancel", {
       id: 11,
@@ -172,14 +178,15 @@ describe("automationRegistryList compatibility", () => {
     })
   })
 
-  it("keeps wake discriminant when registry rows include config null", async () => {
+  it("keeps wake discriminant when registry rows include config null", async () => {
     mocks.call.mockImplementation(async (method: string) => {
       if (method === "automation_registry_list") {
         return [
           backendRegistryWake({
-            id: 3,
-            name: "唤醒_3",
-            targetConversationId: 9,
+            id: 3,
+            name: "唤醒_3",
+            sourceConversationId: 9,
+            targetConversationId: 9,
             target: "conversation:9",
             triggerKind: "timer_at",
             fireAt: "2026-09-08T12:00:00.000Z",
@@ -196,7 +203,62 @@ describe("automationRegistryList compatibility", () => {
       id: 3,
       type: "wake",
       status: "pending",
-      target_conversation_id: 9,
-    })
-  })
-})
+      target_conversation_id: 9,
+    })
+  })
+
+  it("uses the persisted source conversation when target aliases disagree", async () => {
+    mocks.call.mockImplementation(async (method: string) => {
+      if (method === "automation_registry_list") {
+        return [
+          backendRegistryWake({
+            sourceConversationId: 42,
+            targetConversationId: 99,
+            target: "conversation:99",
+          }),
+        ]
+      }
+      throw new Error(`unexpected method ${method}`)
+    })
+
+    const [wake] = await automationRegistryList()
+
+    expect((wake as WakeRecord).source_conversation_id).toBe(42)
+    expect(wakeSourceConversationId(wake as WakeRecord)).toBe(42)
+  })
+
+  it("normalizes direct wake CRUD rows and keeps the persisted owner on update", async () => {
+    mocks.call.mockImplementation(async (method: string, args?: Record<string, unknown>) => {
+      if (method === "wake_create" || method === "wake_update") {
+        expect(args?.draft).toMatchObject({ sourceConversationId: 42 })
+        if (method === "wake_update") {
+          expect(args?.sourceConversationId).toBe(42)
+        }
+        return {
+          id: 21,
+          source_conversation_id: 42,
+          trigger_kind: "timer_after",
+          fire_at: "2026-09-09T12:01:00.000Z",
+          delay_ms: 60_000,
+          prompt: "check in",
+          status: "pending",
+          created_at: "2026-09-09T12:00:00.000Z",
+          updated_at: "2026-09-09T12:00:00.000Z",
+        }
+      }
+      throw new Error(`unexpected method ${method}`)
+    })
+
+    const draft = {
+      schedule: { kind: "after" as const, delay_ms: 60_000 },
+      prompt: "check in",
+      target_conversation_id: 99,
+    }
+    const created = await wakeCreate(draft, 42)
+    const updated = await wakeUpdate(21, draft, 42)
+
+    expect(created.source_conversation_id).toBe(42)
+    expect(created.target_conversation_id).toBe(42)
+    expect(updated.source_conversation_id).toBe(42)
+  })
+})

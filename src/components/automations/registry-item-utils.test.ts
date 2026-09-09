@@ -21,7 +21,7 @@ describe("registry-item-utils", () => {
       config: null,
       schedule: { kind: "after", delay_ms: 30_000 },
       target_conversation_id: 42,
-    } as AutomationRegistryItem
+    } as unknown as AutomationRegistryItem
 
     expect(resolveRegistryItemKind(item)).toBe("wake")
     expect(isRegistryWake(item)).toBe(true)
@@ -34,7 +34,7 @@ describe("registry-item-utils", () => {
       trigger_kind: "timer_at",
       status: "pending",
       schedule: { kind: "at", at: "2026-09-08T12:00:00.000Z" },
-    } as AutomationRegistryItem
+    } as unknown as AutomationRegistryItem
 
     expect(resolveRegistryItemKind(item)).toBe("wake")
   })
@@ -48,6 +48,21 @@ describe("registry-item-utils", () => {
         status: "pending",
         schedule: { kind: "after", delay_ms: 1000 },
         target: "conversation:42",
+      })
+    ).toBe(42)
+  })
+
+  it("uses the normalized source conversation as the CRUD owner", () => {
+    expect(
+      wakeSourceConversationId({
+        id: 3,
+        name: "x",
+        enabled: true,
+        status: "pending",
+        schedule: { kind: "after", delay_ms: 1000 },
+        source_conversation_id: 42,
+        target_conversation_id: 99,
+        target: "conversation:99",
       })
     ).toBe(42)
   })

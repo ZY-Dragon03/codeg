@@ -6,7 +6,7 @@ import type {
 } from "@/lib/types"
 import {
   parseConversationTarget,
-  resolveWakeConversationId,
+  resolveWakeSourceConversationId,
 } from "@/lib/wake-wire"
 import { formatClientTimezone } from "./wake-editor-utils"
 
@@ -97,10 +97,11 @@ export function wakeScheduleDescription(
 }
 
 export function wakeSourceConversationId(wake: WakeRecord): number | null {
-  return resolveWakeConversationId({
+  return resolveWakeSourceConversationId({
+    source_conversation_id: wake.source_conversation_id,
     target_conversation_id: wake.target_conversation_id,
     target: wake.target,
   })
 }
 
-export { parseConversationTarget, resolveWakeConversationId }
+export { parseConversationTarget, resolveWakeSourceConversationId }
