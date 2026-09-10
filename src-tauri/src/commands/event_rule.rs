@@ -218,6 +218,7 @@ pub async fn event_rule_preview_core(
         crate::event_rules::types::ConversationRef::SpecificConversation => {
             draft.config.action.conversation_id
         }
+        crate::event_rules::types::ConversationRef::AllCurrentConversations => None,
     };
     let target_exists = if let Some(id) = resolved_target_id {
         crate::db::entities::conversation::Entity::find_by_id(id)

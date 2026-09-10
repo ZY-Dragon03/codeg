@@ -1,9 +1,9 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { ChevronDown, Plus, X } from "lucide-react"
+import { Plus, X } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { eventRulePreview, eventRuleValidate } from "@/lib/api"
+import { eventRuleValidate } from "@/lib/api"
 import { toErrorMessage } from "@/lib/app-error"
 import { getAgentLabel } from "@/lib/custom-agents"
 import { ALL_AGENT_TYPES, type AgentType } from "@/lib/types"
@@ -11,23 +11,16 @@ import type {
   DbConversationSummary,
   EventRule,
   EventRuleDraft,
-  EventRulePreview,
   EventRuleScope,
   EventRuleContentSource,
 } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
-import {
   FolderSelect,
   type FolderSelectOption,
 } from "@/components/shared/folder-select"
 import { ConversationSelect } from "@/components/shared/conversation-select"
-import { ConversationMultiSelect } from "@/components/shared/conversation-multi-select"
 import { sortConversationsForAutomationPicker } from "@/lib/conversation-picker-utils"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -39,7 +32,18 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { AutomationEditorShell } from "./automation-dialog-layout"
+import {
+  AutomationEditorFooter,
+  AutomationEditorSection,
+  AutomationEditorShell,
+} from "./automation-dialog-layout"
+import { AutomationConversationTargetPicker } from "./automation-conversation-target-picker"
+import {
+  resolveTargetIds,
+  selectedIdsFromEventAction,
+  targetModeFromEventAction,
+} from "./automation-targets"
+import type { AutomationTargetMode } from "@/lib/types"
 
 export type EventRuleAutomationType =
   | "content_detection"
@@ -160,31 +164,12 @@ function conditionForContentSource(
   }
 }
 
-function needsAdvanced(
-  rule: EventRule | null | undefined,
-  scope: EventRuleScope,
-  initialScope?: EventRuleScope
-) {
-  if (!rule) return false
-  if (rule.priority !== 0) return true
-  if (scope.kind === "global" || scope.kind === "folder" || scope.kind === "agent_type") {
-    return true
-  }
-  if (
-    initialScope?.kind === "conversation" &&
-    scope.kind === "conversation" &&
-    scope.conversation_id !== initialScope.conversation_id
-  ) {
-    return true
-  }
-  return false
-}
-
 export function EventRuleEditor({
   rule,
   initialScope,
   initialAutomationType,
   subpageTitle,
+  currentConversationId,
   conversations,
   folders = [],
   agentTypes = ALL_AGENT_TYPES,
@@ -195,6 +180,7 @@ export function EventRuleEditor({
   initialScope?: EventRuleScope
   initialAutomationType?: EventRuleAutomationType
   subpageTitle?: string
+  currentConversationId?: number | null
   conversations: DbConversationSummary[]
   folders?: readonly FolderSelectOption[]
   agentTypes?: readonly AgentType[]
@@ -214,19 +200,12 @@ export function EventRuleEditor({
   )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [sampleText, setSampleText] = useState("")
-  const [sampleErrorKind, setSampleErrorKind] = useState("")
-  const sampleConversationId =
-    initialScope?.kind === "conversation" ? initialScope.conversation_id : 0
-  const [preview, setPreview] = useState<EventRulePreview | null>(null)
-  const [advancedOpen, setAdvancedOpen] = useState(() =>
-    needsAdvanced(
-      rule,
-      rule?.config.scope ?? initialScope ?? { kind: "global" },
-      initialScope
-    )
+  const [targetMode, setTargetMode] = useState<AutomationTargetMode>(() =>
+    rule ? targetModeFromEventAction(rule.config.action) : "current"
   )
-  const [previewOpen, setPreviewOpen] = useState(false)
+  const [targetConversationIds, setTargetConversationIds] = useState<number[]>(
+    () => (rule ? selectedIdsFromEventAction(rule.config.action) : [])
+  )
   const scope = draft.config.scope
   const condition = draft.config.condition
   const action = draft.config.action
@@ -264,7 +243,6 @@ export function EventRuleEditor({
   const update = (fn: (current: EventRuleDraft) => EventRuleDraft) => {
     setDraft((current) => fn(current))
     setError(null)
-    setPreview(null)
   }
   const setScope = (next: EventRuleScope) =>
     update((current) => ({
@@ -281,31 +259,37 @@ export function EventRuleEditor({
     setSaving(true)
     setError(null)
     try {
-      await eventRuleValidate(draft)
-      await onSubmit(draft)
+      const targetIds = resolveTargetIds(
+        targetMode,
+        currentConversationId,
+        targetConversationIds,
+        conversations
+      )
+      const nextDraft: EventRuleDraft = {
+        ...draft,
+        config: {
+          ...draft.config,
+          action: {
+            ...draft.config.action,
+            conversation_ref:
+              targetMode === "current"
+                ? "source_conversation"
+                : targetMode === "all_current"
+                  ? "all_current_conversations"
+                  : "specific_conversation",
+            conversation_id:
+              targetMode === "current" ? null : (targetIds[0] ?? null),
+            target_conversation_ids:
+              targetMode === "current" ? [] : targetIds,
+          },
+        },
+      }
+      await eventRuleValidate(nextDraft)
+      await onSubmit(nextDraft)
     } catch (cause) {
       setError(toErrorMessage(cause))
     } finally {
       setSaving(false)
-    }
-  }
-  const runPreview = async () => {
-    setError(null)
-    try {
-      const fallbackConversation =
-        sampleConversationId ||
-        (scope.kind === "conversation"
-          ? scope.conversation_id
-          : (conversations[0]?.id ?? 0))
-      if (!fallbackConversation) throw new Error(t("editor.selectSample"))
-      const result = await eventRulePreview(rule?.id ?? null, draft, {
-        conversationId: fallbackConversation,
-        text: sampleText,
-        errorKind: sampleErrorKind || null,
-      })
-      setPreview(result)
-    } catch (cause) {
-      setError(toErrorMessage(cause))
     }
   }
   const inSubpage = Boolean(subpageTitle && onCancel)
@@ -356,17 +340,17 @@ export function EventRuleEditor({
       </div>
 
       {isForwardAfter ? (
-        <p className="text-sm text-muted-foreground">
-          {t("editor.whenDescriptionForward")}
-        </p>
+        <AutomationEditorSection
+          title={t("editor.whenForward")}
+          description={t("editor.whenDescriptionForward")}
+        >
+          <></>
+        </AutomationEditorSection>
       ) : (
-      <fieldset className="grid gap-3 rounded-xl border p-4">
-        <legend className="px-1 text-sm font-semibold">
-          {t("editor.whenContentDetection")}
-        </legend>
-        <p className="text-sm text-muted-foreground">
-          {t("editor.whenDescriptionContentDetection")}
-        </p>
+      <AutomationEditorSection
+        title={t("editor.whenContentDetection")}
+        description={t("editor.whenDescriptionContentDetection")}
+      >
           <div className="grid gap-2">
             <Label>{t("editor.contentSource")}</Label>
             <div className="flex flex-wrap gap-2">
@@ -544,16 +528,10 @@ export function EventRuleEditor({
             </div>
           </div>
         ) : null}
-      </fieldset>
+      </AutomationEditorSection>
       )}
 
-      <fieldset className="grid gap-3 rounded-xl border p-4">
-        <legend className="px-1 text-sm font-semibold">
-          {t("editor.then")}
-        </legend>
-        <p className="text-sm text-muted-foreground">
-          {t("editor.sendToConversationsHint")}
-        </p>
+      <AutomationEditorSection title={t("editor.then")}>
         <div className="grid gap-1.5">
           <Label htmlFor="event-rule-prompt">{t("editor.prompt")}</Label>
           <Textarea
@@ -740,35 +718,18 @@ export function EventRuleEditor({
             </Button>
           </div>
         </div>
-        <div className="grid gap-2">
-          <Label>{t("editor.sendToConversations")}</Label>
-          <p className="text-xs text-muted-foreground">
-            {t("editor.additionalTargetsHint")}
-          </p>
-          <ConversationMultiSelect
-            conversations={sortedConversations}
-            folders={folders}
-            value={action.target_conversation_ids ?? []}
-            onChange={(ids) =>
-              update((d) => ({
-                ...d,
-                config: {
-                  ...d.config,
-                  action: {
-                    ...d.config.action,
-                    target_conversation_ids: ids,
-                  },
-                },
-              }))
-            }
-          />
-        </div>
-      </fieldset>
+        <AutomationConversationTargetPicker
+          currentConversationId={currentConversationId}
+          conversations={sortedConversations}
+          folders={folders}
+          mode={targetMode}
+          selectedIds={targetConversationIds}
+          onModeChange={setTargetMode}
+          onSelectedIdsChange={setTargetConversationIds}
+        />
+      </AutomationEditorSection>
 
-      <fieldset className="grid gap-3 rounded-xl border p-4">
-        <legend className="px-1 text-sm font-semibold">
-          {t("editor.limits")}
-        </legend>
+      <AutomationEditorSection title={t("editor.limits")}>
         <div className="grid gap-2 sm:grid-cols-2">
           <div className="grid gap-1.5">
             <Label htmlFor="event-rule-max-attempts">
@@ -822,217 +783,110 @@ export function EventRuleEditor({
             seconds: Math.round(draft.config.guard.cooldown_ms / 1000),
           })}
         </p>
-      </fieldset>
+      </AutomationEditorSection>
 
-      {isContentDetection ? (
-      <Collapsible
-        open={previewOpen}
-        onOpenChange={setPreviewOpen}
-        className="rounded-xl border p-4"
+      <AutomationEditorSection title={t("editor.priority")}>
+        <div className="grid gap-1.5">
+          <Label htmlFor="event-rule-priority">{t("editor.priority")}</Label>
+          <Input
+            id="event-rule-priority"
+            type="number"
+            value={draft.priority}
+            onChange={(e) =>
+              update((d) => ({
+                ...d,
+                priority: Number(e.target.value) || 0,
+              }))
+            }
+          />
+          <p className="text-xs text-muted-foreground">
+            {t("editor.priorityHint")}
+          </p>
+        </div>
+      </AutomationEditorSection>
+
+      <AutomationEditorSection
+        title={t("editor.listenInConversations")}
+        description={t("editor.listenInConversationsHint")}
       >
-        <CollapsibleTrigger asChild>
-          <Button
-            variant="ghost"
-            className="w-full justify-between px-0 hover:bg-transparent"
+        <div className="grid gap-1.5">
+          <Select
+            value={scope.kind}
+            onValueChange={(value) =>
+              setScope(scopeWithKind(value as EventRuleScope["kind"], scope))
+            }
           >
-            <span>
-              <span className="block text-left font-semibold">
-                {t("editor.testMatch")}
-              </span>
-              <span className="block text-left text-xs font-normal text-muted-foreground">
-                {t("editor.testMatchDescription")}
-              </span>
-            </span>
-            <ChevronDown
-              className={
-                previewOpen
-                  ? "size-4 rotate-180 transition-transform"
-                  : "size-4 transition-transform"
-              }
-            />
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="grid gap-3 pt-4">
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="conversation">
+                {t("editor.listenCurrentConversation")}
+              </SelectItem>
+              <SelectItem value="global">{t("scopeGlobal")}</SelectItem>
+              <SelectItem value="folder">{t("scopeFolder")}</SelectItem>
+              <SelectItem value="agent_type">{t("scopeAgent")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {scope.kind === "conversation" ? (
           <div className="grid gap-1.5">
-            <Label htmlFor="event-rule-sample-text">
-              {t("editor.testMatchSample")}
-            </Label>
-            <Textarea
-              id="event-rule-sample-text"
-              value={sampleText}
-              onChange={(e) => setSampleText(e.target.value)}
+            <Label>{t("scopeConversation")}</Label>
+            <ConversationSelect
+              conversations={sortedConversations}
+              folders={folders}
+              value={scope.conversation_id}
+              placeholder={t("editor.selectConversation")}
+              onChange={(id) =>
+                setScope({ kind: "conversation", conversation_id: id })
+              }
             />
           </div>
-          {contentSource !== "ai_output" ? (
-            <div className="grid gap-1.5">
-              <Label htmlFor="event-rule-sample-error">
-                {t("editor.sampleErrorKind")}
-              </Label>
-              <Input
-                id="event-rule-sample-error"
-                value={sampleErrorKind}
-                onChange={(e) => setSampleErrorKind(e.target.value)}
-              />
-            </div>
-          ) : null}
-          <Button variant="outline" className="w-fit" onClick={runPreview}>
-            {t("editor.runTestMatch")}
-          </Button>
-          {preview ? (
-            <div className="rounded-xl bg-muted p-3 text-sm">
-              <p
-                className={
-                  preview.condition_matches
-                    ? "font-medium text-primary"
-                    : "font-medium text-destructive"
-                }
-              >
-                {preview.condition_matches
-                  ? t("editor.testMatchWillTrigger")
-                  : t("editor.testMatchWillNotTrigger")}
-              </p>
-              <p className="mt-2 text-xs text-muted-foreground">
-                {t("editor.testMatchNoSendHint")}
-              </p>
-            </div>
-          ) : null}
-        </CollapsibleContent>
-      </Collapsible>
-      ) : null}
-
-      <Collapsible
-        open={advancedOpen}
-        onOpenChange={setAdvancedOpen}
-        className="rounded-xl border p-4"
-      >
-        <CollapsibleTrigger asChild>
-          <Button
-            variant="ghost"
-            className="w-full justify-between px-0 hover:bg-transparent"
-          >
-            <span>
-              <span className="block text-left font-semibold">
-                {t("editor.advanced")}
-              </span>
-              <span className="block text-left text-xs font-normal text-muted-foreground">
-                {t("editor.advancedDescription")}
-              </span>
-            </span>
-            <ChevronDown
-              className={
-                advancedOpen
-                  ? "size-4 rotate-180 transition-transform"
-                  : "size-4 transition-transform"
-              }
-            />
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="grid gap-4 pt-4">
+        ) : null}
+        {scope.kind === "folder" ? (
           <div className="grid gap-1.5">
-            <Label htmlFor="event-rule-priority">
-              {t("editor.priority")}
-            </Label>
-            <Input
-              id="event-rule-priority"
-              type="number"
-              value={draft.priority}
-              onChange={(e) =>
-                update((d) => ({
-                  ...d,
-                  priority: Number(e.target.value) || 0,
-                }))
-              }
+            <Label>{t("editor.folder")}</Label>
+            <FolderSelect
+              folders={folderOptions}
+              value={scope.folder_id}
+              variant="field"
+              placeholder={t("editor.folderPlaceholder")}
+              title={t("editor.folder")}
+              onChange={(id) => setScope({ kind: "folder", folder_id: id })}
             />
-            <p className="text-xs text-muted-foreground">
-              {t("editor.priorityHint")}
-            </p>
           </div>
+        ) : null}
+        {scope.kind === "agent_type" ? (
           <div className="grid gap-1.5">
-            <Label>{t("editor.listenInConversations")}</Label>
+            <Label>{t("editor.agent")}</Label>
             <Select
-              value={scope.kind}
-              onValueChange={(value) =>
-                setScope(scopeWithKind(value as EventRuleScope["kind"], scope))
+              value={scope.agent_type}
+              onValueChange={(agent_type) =>
+                setScope({ kind: "agent_type", agent_type })
               }
             >
               <SelectTrigger>
-                <SelectValue />
+                <SelectValue placeholder={t("editor.agentPlaceholder")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="conversation">
-                  {t("editor.listenCurrentConversation")}
-                </SelectItem>
-                <SelectItem value="global">{t("scopeGlobal")}</SelectItem>
-                <SelectItem value="folder">{t("scopeFolder")}</SelectItem>
-                <SelectItem value="agent_type">{t("scopeAgent")}</SelectItem>
+                {agentOptions.map((agent) => (
+                  <SelectItem value={agent} key={agent}>
+                    {getAgentLabel(agent)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">
-              {t("editor.listenInConversationsHint")}
-            </p>
           </div>
-          {scope.kind === "conversation" ? (
-            <div className="grid gap-1.5">
-              <Label>{t("scopeConversation")}</Label>
-              <ConversationSelect
-                conversations={sortedConversations}
-                folders={folders}
-                value={scope.conversation_id}
-                placeholder={t("editor.selectConversation")}
-                onChange={(id) =>
-                  setScope({ kind: "conversation", conversation_id: id })
-                }
-              />
-            </div>
-          ) : null}
-          {scope.kind === "folder" ? (
-            <div className="grid gap-1.5">
-              <Label>{t("editor.folder")}</Label>
-              <FolderSelect
-                folders={folderOptions}
-                value={scope.folder_id}
-                variant="field"
-                placeholder={t("editor.folderPlaceholder")}
-                title={t("editor.folder")}
-                onChange={(id) => setScope({ kind: "folder", folder_id: id })}
-              />
-            </div>
-          ) : null}
-          {scope.kind === "agent_type" ? (
-            <div className="grid gap-1.5">
-              <Label>{t("editor.agent")}</Label>
-              <Select
-                value={scope.agent_type}
-                onValueChange={(agent_type) =>
-                  setScope({ kind: "agent_type", agent_type })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={t("editor.agentPlaceholder")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {agentOptions.map((agent) => (
-                    <SelectItem value={agent} key={agent}>
-                      {getAgentLabel(agent)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          ) : null}
-        </CollapsibleContent>
-      </Collapsible>
-
-      <div className="flex justify-end gap-2 border-t pt-4">
-        {onCancel ? (
-          <Button variant="outline" onClick={onCancel}>
-            {t("editor.cancel")}
-          </Button>
         ) : null}
-        <Button disabled={saving} onClick={save}>
-          {saving ? t("editor.saving") : t("editor.save")}
-        </Button>
-      </div>
+      </AutomationEditorSection>
+
+      <AutomationEditorFooter
+        onCancel={onCancel}
+        onSave={() => void save()}
+        cancelLabel={t("editor.cancel")}
+        saveLabel={saving ? t("editor.saving") : t("editor.save")}
+        saving={saving}
+      />
       </AutomationEditorShell>
     </div>
   )

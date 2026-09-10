@@ -1553,6 +1553,15 @@ export type EventRuleConditionKind =
   | "regex"
   | "error_kind"
 export type EventRuleContentSource = "ai_output" | "error" | "both"
+/**
+ * Shared delivery target contract used by every automation editor.
+ * `all_current` is a snapshot at save time; it does not include future
+ * conversations automatically.
+ */
+export type AutomationTargetMode =
+  | "current"
+  | "all_current"
+  | "specific_multiple"
 export interface EventRuleUserMessageIgnoreRule {
   kind: "exact" | "contains" | "regex"
   value: string
@@ -1570,7 +1579,10 @@ export interface EventRuleCondition {
 }
 export interface EventRuleAction {
   kind: "send_to_conversation"
-  conversation_ref: "source_conversation" | "specific_conversation"
+  conversation_ref:
+    | "source_conversation"
+    | "specific_conversation"
+    | "all_current_conversations"
   conversation_id?: number | null
   prompt: string
   target_conversation_ids?: number[]
@@ -1656,6 +1668,8 @@ export interface WakeRecord {
   target?: string | null
   /** Legacy registry alias retained for older payloads. */
   target_conversation_id?: number | null
+  target_mode?: AutomationTargetMode | null
+  target_conversation_ids?: number[]
   description?: string | null
   creator?: string | null
   provenance?: AutomationRegistryProvenance
@@ -1670,6 +1684,8 @@ export interface WakeDraft {
   schedule: WakeSchedule
   prompt?: string | null
   target_conversation_id?: number | null
+  target_mode?: AutomationTargetMode
+  target_conversation_ids?: number[]
   enabled?: boolean
 }
 export interface AutomationRegistryEventRule extends EventRule {

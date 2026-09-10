@@ -595,6 +595,7 @@ impl EventRulesEngine {
         let configured_target_id = match rule.config.action.conversation_ref {
             ConversationRef::SourceConversation => Some(event.conversation_id),
             ConversationRef::SpecificConversation => rule.config.action.conversation_id,
+            ConversationRef::AllCurrentConversations => None,
         };
         let trigger_name = lifecycle_trigger_name(&event.trigger);
         match self
@@ -789,7 +790,9 @@ impl EventRulesEngine {
             ConversationRef::SourceConversation if target_id == event.conversation_id => {
                 event.connection_id.clone()
             }
-            ConversationRef::SourceConversation | ConversationRef::SpecificConversation => {
+            ConversationRef::SourceConversation
+            | ConversationRef::SpecificConversation
+            | ConversationRef::AllCurrentConversations => {
                 if let Some(id) = self
                     .manager
                     .find_eligible_connection_by_conversation_id(conversation_id)

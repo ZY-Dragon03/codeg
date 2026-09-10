@@ -110,6 +110,10 @@ pub enum ActionKind {
 pub enum ConversationRef {
     SourceConversation,
     SpecificConversation,
+    /// Snapshot of all eligible conversations at save time. The concrete ids
+    /// live in `target_conversation_ids`; this variant prevents the runtime
+    /// from silently adding future conversations when the rule fires.
+    AllCurrentConversations,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -214,12 +218,16 @@ impl EventRuleConfig {
         if !matches!(self.action.kind, ActionKind::SendToConversation) {
             return Err("only existing conversation forwarding is supported".into());
         }
-        if matches!(
-            self.action.conversation_ref,
-            ConversationRef::SpecificConversation
-        ) && self.action.conversation_id.is_none()
-        {
-            return Err("specific_conversation requires conversation_id".into());
+        match self.action.conversation_ref {
+            ConversationRef::SpecificConversation if self.action.conversation_id.is_none() => {
+                return Err("specific_conversation requires conversation_id".into());
+            }
+            ConversationRef::AllCurrentConversations
+                if self.action.target_conversation_ids.is_empty() =>
+            {
+                return Err("all_current_conversations requires target_conversation_ids".into());
+            }
+            _ => {}
         }
         if self.action.prompt.trim().is_empty() {
             return Err("action prompt must not be empty".into());

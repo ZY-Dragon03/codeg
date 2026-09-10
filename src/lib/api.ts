@@ -3510,6 +3510,10 @@ type LegacyWakeRecord = {
   target?: string | null
   target_conversation_id?: number | null
   targetConversationId?: number | null
+  target_mode?: WakeRecord["target_mode"]
+  targetMode?: WakeRecord["target_mode"]
+  target_conversation_ids?: number[] | null
+  targetConversationIds?: number[] | null
   description?: string | null
   provenance?: string
   creator?: string | null
@@ -3541,6 +3545,10 @@ function normalizeLegacyWake(wake: WakeRecord | LegacyWakeRecord): WakeRecord {
         })
   const sourceConversationId = resolveWakeSourceConversationId(raw)
   const targetConversationId = resolveWakeConversationId(raw)
+  const targetMode = raw.target_mode ?? raw.targetMode ?? "current"
+  const targetConversationIds = [
+    ...(raw.target_conversation_ids ?? raw.targetConversationIds ?? []),
+  ]
   const provenance =
     raw.provenance ?? raw.creator_kind ?? raw.creatorKind ?? "user"
   const creatorId = raw.creator_id ?? raw.creatorId ?? null
@@ -3554,6 +3562,8 @@ function normalizeLegacyWake(wake: WakeRecord | LegacyWakeRecord): WakeRecord {
     source_conversation_id: sourceConversationId,
     target: raw.target ?? (targetConversationId == null ? null : `conversation:${targetConversationId}`),
     target_conversation_id: targetConversationId,
+    target_mode: targetMode,
+    target_conversation_ids: targetConversationIds,
     description: raw.description ?? "one-shot wake",
     creator: raw.creator ?? (creatorId == null ? null : `agent:${creatorId}`),
     provenance,
@@ -3639,6 +3649,8 @@ type WakeBackendDraft = {
   delayMs: number | null
   prompt: string
   displayName: string | null
+  targetMode: NonNullable<WakeDraft["target_mode"]>
+  targetConversationIds: number[]
   creatorKind: "user"
   creatorId: string | null
 }
@@ -3655,7 +3667,14 @@ function toWakeBackendDraft(
   // The persisted owner is authoritative for existing wakes. The editable
   // target field is only a legacy creation input and must never change which
   // row a management call is scoped to.
-  const source = sourceConversationId ?? draft.target_conversation_id
+  const targetMode = draft.target_mode ?? "current"
+  const targetConversationIds = [...new Set(
+    (draft.target_conversation_ids ?? []).filter(
+      (id) => Number.isInteger(id) && id > 0
+    )
+  )]
+  const source =
+    sourceConversationId ?? draft.target_conversation_id ?? targetConversationIds[0]
   if (!source || source <= 0) {
     throw new Error("A target conversation is required for a wake")
   }
@@ -3672,6 +3691,8 @@ function toWakeBackendDraft(
       delayMs: schedule.delay_ms,
       prompt: normalizeWakePrompt(draft.prompt),
       displayName,
+      targetMode,
+      targetConversationIds,
       creatorKind: "user",
       creatorId: null,
     }
@@ -3687,6 +3708,8 @@ function toWakeBackendDraft(
       delayMs: null,
       prompt: normalizeWakePrompt(draft.prompt),
       displayName,
+      targetMode,
+      targetConversationIds,
       creatorKind: "user",
       creatorId: null,
     }
@@ -3701,6 +3724,8 @@ function toWakeBackendDraft(
     delayMs: null,
     prompt: normalizeWakePrompt(draft.prompt),
     displayName,
+    targetMode,
+    targetConversationIds,
     creatorKind: "user",
     creatorId: null,
   }

@@ -2,13 +2,12 @@ import { type ReactElement } from "react"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { eventRulePreview, eventRuleValidate } from "@/lib/api"
+import { eventRuleValidate } from "@/lib/api"
 import type { DbConversationSummary, EventRuleDraft } from "@/lib/types"
 import { EventRuleEditor, newEventRuleDraft } from "./event-rule-editor"
 import enMessages from "@/i18n/messages/en.json"
 
 vi.mock("@/lib/api", () => ({
-  eventRulePreview: vi.fn(),
   eventRuleValidate: vi.fn(),
 }))
 
@@ -76,19 +75,7 @@ describe("EventRuleEditor", () => {
     expect(draft.config.action.prompt).toBe("resume from the interruption")
   })
 
-  it("uses backend preview without saving or sending", async () => {
-    vi.mocked(eventRulePreview).mockResolvedValue({
-      scope_matches: true,
-      condition_matches: true,
-      resolved_target_id: 41,
-      target_exists: true,
-      target_available: true,
-      winner_rule_id: null,
-      draft_is_winner: true,
-      draft_is_shadowed: false,
-      shadowed_rule_ids: [],
-      guard_blocked: null,
-    })
+  it("does not expose match testing in the product editor", () => {
     render(
       withIntl(
         <EventRuleEditor
@@ -98,14 +85,12 @@ describe("EventRuleEditor", () => {
         />
       )
     )
-    fireEvent.click(screen.getByRole("button", { name: /Test match/ }))
-    fireEvent.change(screen.getByLabelText("Sample content to test"), {
-      target: { value: "TLS connection reset" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Run match test" }))
-    await waitFor(() => expect(eventRulePreview).toHaveBeenCalledTimes(1))
-    expect(eventRuleValidate).not.toHaveBeenCalled()
-    expect(screen.getByText("✓ Would trigger")).toBeInTheDocument()
+
+    expect(
+      screen.queryByRole("button", { name: /Test match/i })
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(/Sample content to test/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Run match test/i)).not.toBeInTheDocument()
   })
 
   it("starts new automations enabled with the editable retry defaults", () => {
@@ -167,20 +152,19 @@ describe("EventRuleEditor", () => {
     expect(screen.queryByText("[object Object]")).not.toBeInTheDocument()
   })
 
-  it("keeps advanced implementation settings collapsed by default", () => {
+  it("shows priority and listening scope as regular editor sections", () => {
     render(
       withIntl(
         <EventRuleEditor conversations={CONVERSATIONS} onSubmit={vi.fn()} />
       )
     )
 
-    expect(screen.queryByLabelText("Priority")).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: /Advanced settings/ }))
     expect(screen.getByLabelText("Priority")).toBeInTheDocument()
     expect(screen.getByText("Listen in conversations")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Advanced settings/ })).not.toBeInTheDocument()
   })
 
-  it("uses named workspace and agent selectors in advanced settings", () => {
+  it("uses named workspace and agent selectors in listening scope", () => {
     render(
       withIntl(
         <EventRuleEditor
@@ -198,9 +182,8 @@ describe("EventRuleEditor", () => {
       )
     )
 
-    fireEvent.click(screen.getByRole("button", { name: /Advanced settings/ }))
     const listenSection = screen.getByText("Listen in conversations").closest(
-      "div.grid"
+      "section"
     )!
     fireEvent.click(within(listenSection).getByRole("combobox"))
     fireEvent.click(screen.getByRole("option", { name: "Folder" }))

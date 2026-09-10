@@ -1,7 +1,7 @@
 //! Persistent one-shot wake scheduler. Wakes always resume an existing
 //! conversation through the same ACP follow-up path as Event Rules.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -137,7 +137,7 @@ impl WakeScheduler {
     }
 
     async fn dispatch(&self, wake: crate::db::entities::agent_wake::Model) {
-        let Some(source) = conversation::Entity::find_by_id(wake.source_conversation_id)
+        let Some(_source) = conversation::Entity::find_by_id(wake.source_conversation_id)
             .filter(conversation::Column::DeletedAt.is_null())
             .one(&self.db.conn)
             .await
@@ -163,49 +163,83 @@ impl WakeScheduler {
         } else {
             (self.emitter.clone(), self.owner_window_label.clone())
         };
-        let connection_id = match self
-            .manager
-            .ensure_existing_conversation_ready(
-                &self.db,
-                &self.data_dir,
-                wake.source_conversation_id,
-                owner_window_label,
-                emitter,
-            )
-            .await
-        {
-            Ok(connection_id) => connection_id,
+        let target_ids = match wakes::target_ids(&wake) {
+            Ok(ids) if !ids.is_empty() => ids,
+            Ok(_) => {
+                let _ = wakes::mark_failed(
+                    &self.db.conn,
+                    wake.id,
+                    "wake has no persisted target conversations".into(),
+                )
+                .await;
+                emit_automation_registry_changed(&self.emitter, Some(wake.id), None);
+                return;
+            }
             Err(error) => {
                 let _ = wakes::mark_failed(&self.db.conn, wake.id, error.to_string()).await;
                 emit_automation_registry_changed(&self.emitter, Some(wake.id), None);
                 return;
             }
         };
-        let result = self
-            .manager
-            .send_prompt_linked_with_message_id(
-                &self.db,
-                &connection_id,
-                vec![PromptInputBlock::Text {
-                    text: wake.prompt.clone(),
-                }],
-                Some(source.folder_id),
-                Some(wake.source_conversation_id),
-                None,
-                None,
-            )
-            .await;
-        match result {
-            Ok(_) => {
-                if let Err(error) = wakes::mark_sent(&self.db.conn, wake.id).await {
-                    tracing::error!(wake_id = wake.id, "[wake] sent but receipt failed: {error}");
-                }
-                emit_automation_registry_changed(&self.emitter, Some(wake.id), None);
+        let mut failures = Vec::new();
+        let mut sent_targets = HashSet::new();
+        for target_id in target_ids {
+            if !sent_targets.insert(target_id) {
+                continue;
             }
-            Err(error) => {
-                let _ = wakes::mark_failed(&self.db.conn, wake.id, error.to_string()).await;
-                emit_automation_registry_changed(&self.emitter, Some(wake.id), None);
+            let Some(target) = conversation::Entity::find_by_id(target_id)
+                .filter(conversation::Column::DeletedAt.is_null())
+                .one(&self.db.conn)
+                .await
+                .ok()
+                .flatten()
+            else {
+                failures.push(format!("target {target_id}: conversation not found"));
+                continue;
+            };
+            let connection_id = match self
+                .manager
+                .ensure_existing_conversation_ready(
+                    &self.db,
+                    &self.data_dir,
+                    target_id,
+                    owner_window_label.clone(),
+                    emitter.clone(),
+                )
+                .await
+            {
+                Ok(connection_id) => connection_id,
+                Err(error) => {
+                    failures.push(format!("target {target_id}: {error}"));
+                    continue;
+                }
+            };
+            if let Err(error) = self
+                .manager
+                .send_prompt_linked_with_message_id(
+                    &self.db,
+                    &connection_id,
+                    vec![PromptInputBlock::Text {
+                        text: wake.prompt.clone(),
+                    }],
+                    Some(target.folder_id),
+                    Some(target_id),
+                    None,
+                    None,
+                )
+                .await
+            {
+                failures.push(format!("target {target_id}: {error}"));
             }
         }
+        if failures.is_empty() {
+            if let Err(error) = wakes::mark_sent(&self.db.conn, wake.id).await {
+                tracing::error!(wake_id = wake.id, "[wake] sent but receipt failed: {error}");
+            }
+        } else {
+            let detail = format!("{}", failures.join("; "));
+            let _ = wakes::mark_failed(&self.db.conn, wake.id, detail).await;
+        }
+        emit_automation_registry_changed(&self.emitter, Some(wake.id), None);
     }
 }

@@ -458,6 +458,8 @@ impl EventAutomationAccess for ConnectionEventAutomationAccess {
             trigger_kind: req.trigger_kind,
             fire_at,
             delay_ms: None,
+            target_mode: agent_wake_service::TARGET_MODE_CURRENT.into(),
+            target_conversation_ids: vec![],
             prompt: req.prompt,
             display_name: None,
             creator_kind: "agent".into(),

@@ -15,6 +15,8 @@ pub struct Model {
     pub trigger_kind: String,
     pub fire_at: Option<DateTimeUtc>,
     pub delay_ms: Option<i64>,
+    pub target_mode: String,
+    pub target_conversation_ids: Option<String>,
     pub prompt: String,
     pub display_name: Option<String>,
     pub status: String,

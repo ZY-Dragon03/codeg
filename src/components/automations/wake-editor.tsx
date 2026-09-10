@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { terminalList } from "@/lib/api"
 import type {
+  AutomationTargetMode,
   DbConversationSummary,
   WakeDraft,
   WakeRecord,
@@ -11,7 +12,6 @@ import type {
 } from "@/lib/types"
 import { useAppWorkspaceStore } from "@/stores/app-workspace-store"
 import { normalizeWakePrompt } from "@/lib/wake-prompt"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -24,11 +24,21 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { WakeProcessSelector } from "./wake-process-selector"
-import { AutomationSubpageHeader } from "./automation-subpage-header"
 import {
+  AutomationConversationTargetPicker,
+} from "./automation-conversation-target-picker"
+import {
+  AutomationEditorFooter,
   AutomationSubpageForm,
+  AutomationSubpageTitle,
   AutomationSubpageSurface,
 } from "./automation-dialog-layout"
+import { AutomationSubpageHeader } from "./automation-subpage-header"
+import {
+  resolveTargetIds,
+  selectedIdsFromWake,
+  targetModeFromWake,
+} from "./automation-targets"
 import { resolveWakeSourceConversationId } from "@/lib/wake-wire"
 import {
   delayToMs,
@@ -118,18 +128,18 @@ export function WakeEditor({
     () => new Map(folders.map((folder) => [folder.id, folder.path])),
     [folders]
   )
+  const currentConversationId = resolveWakeSourceConversationId({
+    source_conversation_id: wake?.source_conversation_id,
+    target_conversation_id: wake?.target_conversation_id,
+    target: wake?.target,
+  }) ?? defaultTargetConversationId
   const preferredFolderPath = useMemo(() => {
-    const conversationId =
-      resolveWakeSourceConversationId({
-        source_conversation_id: wake?.source_conversation_id,
-        target_conversation_id: wake?.target_conversation_id,
-        target: wake?.target,
-      }) ?? defaultTargetConversationId
+    const conversationId = currentConversationId
     if (!conversationId) return null
     const conversation = conversations.find((item) => item.id === conversationId)
     if (!conversation) return null
     return folderPaths.get(conversation.folder_id) ?? null
-  }, [wake, defaultTargetConversationId, conversations, folderPaths])
+  }, [currentConversationId, conversations, folderPaths])
 
   const [name, setName] = useState(() => initialName(wake))
   const [prompt, setPrompt] = useState(wake?.prompt ?? "")
@@ -144,14 +154,11 @@ export function WakeEditor({
   const [processTerminalId, setProcessTerminalId] = useState(() =>
     initialProcessId(wake)
   )
-  const [targetConversationId, setTargetConversationId] = useState(() =>
-    String(
-      resolveWakeSourceConversationId({
-        source_conversation_id: wake?.source_conversation_id,
-        target_conversation_id: wake?.target_conversation_id,
-        target: wake?.target,
-      }) ?? defaultTargetConversationId ?? ""
-    )
+  const [targetMode, setTargetMode] = useState<AutomationTargetMode>(() =>
+    targetModeFromWake(wake ?? {})
+  )
+  const [targetConversationIds, setTargetConversationIds] = useState<number[]>(
+    () => selectedIdsFromWake(wake ?? {})
   )
   const [terminals, setTerminals] = useState<Awaited<ReturnType<typeof terminalList>>>(
     []
@@ -202,8 +209,14 @@ export function WakeEditor({
       setError(t(`wakeValidation.${issue}`))
       return
     }
-    const targetId = Number(targetConversationId)
-    if (!targetConversationId || !Number.isFinite(targetId) || targetId <= 0) {
+    const targetIds = resolveTargetIds(
+      targetMode,
+      currentConversationId,
+      targetConversationIds,
+      conversations
+    )
+    const ownerId = currentConversationId ?? targetIds[0] ?? null
+    if (!ownerId || ownerId <= 0 || (targetMode !== "current" && !targetIds.length)) {
       setError(t("wakeValidation.targetRequired"))
       return
     }
@@ -221,7 +234,9 @@ export function WakeEditor({
           processTerminalId
         ),
         prompt: normalizeWakePrompt(prompt),
-        target_conversation_id: targetId,
+        target_conversation_id: ownerId,
+        target_mode: targetMode,
+        target_conversation_ids: targetMode === "current" ? [] : targetIds,
         enabled: true,
       })
     } catch (cause) {
@@ -233,9 +248,10 @@ export function WakeEditor({
 
   return (
     <AutomationSubpageSurface data-testid="wake-editor">
-      <AutomationSubpageHeader title={subpageTitle} onBack={onCancel} />
+      <AutomationSubpageHeader onBack={onCancel} />
 
-      <AutomationSubpageForm>
+      <AutomationSubpageForm className="flex flex-col gap-5">
+        <AutomationSubpageTitle title={subpageTitle} />
       {rearmNotice ? (
         <p className="rounded-xl bg-primary/10 px-3 py-2 text-sm text-primary">
           {rearmNotice === "past_at"
@@ -351,25 +367,20 @@ export function WakeEditor({
         <p className="text-xs text-muted-foreground">{t("wakePromptHint")}</p>
       </div>
 
-      <div className="space-y-2">
-        <Label>{t("wakeTargetLabel")}</Label>
-        <Select
-          value={targetConversationId}
-          onValueChange={setTargetConversationId}
-          disabled={wake != null}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder={t("wakeTargetPlaceholder")} />
-          </SelectTrigger>
-          <SelectContent>
-            {conversations.map((conversation) => (
-              <SelectItem key={conversation.id} value={String(conversation.id)}>
-                {conversation.title || `#${conversation.id}`}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <AutomationConversationTargetPicker
+        currentConversationId={currentConversationId}
+        conversations={conversations}
+        folders={folders.map((folder) => ({
+          id: folder.id,
+          name: folder.name,
+          alias: folder.alias,
+          path: folder.path,
+        }))}
+        mode={targetMode}
+        selectedIds={targetConversationIds}
+        onModeChange={setTargetMode}
+        onSelectedIdsChange={setTargetConversationIds}
+      />
 
       {validationMessage || error ? (
         <p role="alert" className="text-sm text-destructive">
@@ -377,14 +388,13 @@ export function WakeEditor({
         </p>
       ) : null}
 
-      <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={onCancel} disabled={submitting}>
-          {t("editor.cancel")}
-        </Button>
-        <Button onClick={() => void submit()} disabled={submitting}>
-          {saveLabel ?? t("editor.save")}
-        </Button>
-      </div>
+      <AutomationEditorFooter
+        onCancel={onCancel}
+        onSave={() => void submit()}
+        cancelLabel={t("editor.cancel")}
+        saveLabel={saveLabel ?? t("editor.save")}
+        saving={submitting}
+      />
       </AutomationSubpageForm>
     </AutomationSubpageSurface>
   )

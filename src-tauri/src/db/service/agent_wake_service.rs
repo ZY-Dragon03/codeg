@@ -20,6 +20,9 @@ pub const TRIGGER_PROCESS_EXIT: &str = "process_exit";
 pub const ERR_WAKE_DISPATCHING: &str = "wake_dispatching";
 pub const ERR_WAKE_AT_PAST_REQUIRES_EDIT: &str = "wake_at_past_requires_edit";
 pub const ERR_WAKE_PROCESS_STALE_REQUIRES_EDIT: &str = "wake_process_stale_requires_edit";
+pub const TARGET_MODE_CURRENT: &str = "current";
+pub const TARGET_MODE_ALL_CURRENT: &str = "all_current";
+pub const TARGET_MODE_SPECIFIC_MULTIPLE: &str = "specific_multiple";
 
 #[derive(Debug, Clone)]
 pub struct CreateWake {
@@ -30,6 +33,8 @@ pub struct CreateWake {
     pub trigger_kind: String,
     pub fire_at: Option<DateTime<Utc>>,
     pub delay_ms: Option<i64>,
+    pub target_mode: String,
+    pub target_conversation_ids: Vec<i32>,
     pub prompt: String,
     pub display_name: Option<String>,
     pub creator_kind: String,
@@ -53,6 +58,8 @@ pub async fn create(
             "process exit wake requires terminal_id".into(),
         ));
     }
+    let (target_mode, target_ids) =
+        normalize_target_config(db, &input.target_mode, &input.target_conversation_ids).await?;
     let now = Utc::now();
     let delay_ms = resolve_delay_ms(&input.trigger_kind, input.fire_at, input.delay_ms, now);
     let model = agent_wake::ActiveModel {
@@ -65,6 +72,14 @@ pub async fn create(
         trigger_kind: Set(input.trigger_kind),
         fire_at: Set(input.fire_at),
         delay_ms: Set(delay_ms),
+        target_mode: Set(target_mode),
+        target_conversation_ids: Set(if target_ids.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&target_ids).map_err(|error| {
+                DbError::Validation(format!("failed to encode wake targets: {error}"))
+            })?)
+        }),
         prompt: Set(input.prompt.trim().to_owned()),
         display_name: Set(normalize_display_name(input.display_name)),
         status: Set(STATUS_PENDING.to_owned()),
@@ -107,6 +122,74 @@ fn normalize_creator_kind(value: &str) -> Result<String, DbError> {
         "user" | "agent" => Ok(value),
         _ => Err(DbError::Validation("creator_kind must be user or agent".into())),
     }
+}
+
+fn normalize_target_mode(value: &str) -> Result<String, DbError> {
+    let value = value.trim().to_ascii_lowercase();
+    match value.as_str() {
+        TARGET_MODE_CURRENT | TARGET_MODE_ALL_CURRENT | TARGET_MODE_SPECIFIC_MULTIPLE => {
+            Ok(value)
+        }
+        _ => Err(DbError::Validation(
+            "target_mode must be current, all_current, or specific_multiple".into(),
+        )),
+    }
+}
+
+fn normalize_target_ids(values: &[i32]) -> Result<Vec<i32>, DbError> {
+    let mut ids = Vec::with_capacity(values.len());
+    for id in values {
+        if *id <= 0 {
+            return Err(DbError::Validation(
+                "target conversation ids must be positive".into(),
+            ));
+        }
+        if !ids.contains(id) {
+            ids.push(*id);
+        }
+    }
+    Ok(ids)
+}
+
+async fn normalize_target_config(
+    db: &DatabaseConnection,
+    mode: &str,
+    values: &[i32],
+) -> Result<(String, Vec<i32>), DbError> {
+    let mode = normalize_target_mode(mode)?;
+    let ids = normalize_target_ids(values)?;
+    if mode != TARGET_MODE_CURRENT && ids.is_empty() {
+        return Err(DbError::Validation(
+            "non-current target mode requires at least one conversation".into(),
+        ));
+    }
+    for id in &ids {
+        let exists = crate::db::entities::conversation::Entity::find_by_id(*id)
+            .filter(crate::db::entities::conversation::Column::DeletedAt.is_null())
+            .one(db)
+            .await?
+            .is_some();
+        if !exists {
+            return Err(DbError::Validation(format!(
+                "target conversation {id} does not exist or is deleted"
+            )));
+        }
+    }
+    Ok((mode, ids))
+}
+
+pub fn target_ids(row: &agent_wake::Model) -> Result<Vec<i32>, DbError> {
+    if row.target_mode == TARGET_MODE_CURRENT {
+        return Ok(vec![row.source_conversation_id]);
+    }
+    let ids = row
+        .target_conversation_ids
+        .as_deref()
+        .map(serde_json::from_str::<Vec<i32>>)
+        .transpose()
+        .map_err(|error| DbError::Validation(format!("invalid wake target list: {error}")))?
+        .unwrap_or_default();
+    Ok(ids)
 }
 
 pub async fn list_for_source(
@@ -233,6 +316,8 @@ pub async fn update(
             "process exit wake requires terminal_id".into(),
         ));
     }
+    let (target_mode, target_ids) =
+        normalize_target_config(db, &input.target_mode, &input.target_conversation_ids).await?;
     if input.trigger_kind == TRIGGER_AT {
         let fire_at = input
             .fire_at
@@ -254,6 +339,14 @@ pub async fn update(
     active.trigger_kind = Set(input.trigger_kind);
     active.fire_at = Set(input.fire_at);
     active.delay_ms = Set(delay_ms);
+    active.target_mode = Set(target_mode);
+    active.target_conversation_ids = Set(if target_ids.is_empty() {
+        None
+    } else {
+        Some(serde_json::to_string(&target_ids).map_err(|error| {
+            DbError::Validation(format!("failed to encode wake targets: {error}"))
+        })?)
+    });
     active.prompt = Set(input.prompt.trim().to_owned());
     active.display_name = Set(normalize_display_name(input.display_name));
     active.status = Set(STATUS_PENDING.to_owned());
@@ -447,6 +540,8 @@ mod tests {
             trigger_kind: TRIGGER_AT.into(),
             fire_at: Some(Utc::now() + chrono::Duration::hours(1)),
             delay_ms: None,
+            target_mode: TARGET_MODE_CURRENT.into(),
+            target_conversation_ids: vec![],
             prompt: "later".into(),
             display_name: None,
             creator_kind: "user".into(),
@@ -456,6 +551,38 @@ mod tests {
         assert_eq!(cancelled.status, STATUS_CANCELLED);
         assert_eq!(cancelled.error.as_deref(), Some("cancelled"));
         assert!(claim_due(&db.conn, Utc::now() + chrono::Duration::days(1), 10).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn persists_one_wake_with_a_fixed_multi_target_snapshot() {
+        let db = fresh_in_memory_db().await;
+        let folder = seed_folder(&db, "/tmp/wake-targets").await;
+        let source = seed_conversation(&db, folder, AgentType::Cursor).await;
+        let target = seed_conversation(&db, folder, AgentType::Codex).await;
+        let row = create(
+            &db.conn,
+            CreateWake {
+                source_conversation_id: source,
+                source_connection_id: None,
+                terminal_id: None,
+                process_ref: None,
+                trigger_kind: TRIGGER_AT.into(),
+                fire_at: Some(Utc::now() + chrono::Duration::hours(1)),
+                delay_ms: None,
+                target_mode: TARGET_MODE_SPECIFIC_MULTIPLE.into(),
+                target_conversation_ids: vec![source, target, target],
+                prompt: "forward later".into(),
+                display_name: None,
+                creator_kind: "user".into(),
+                creator_id: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(row.target_mode, TARGET_MODE_SPECIFIC_MULTIPLE);
+        assert_eq!(target_ids(&row).unwrap(), vec![source, target]);
+        assert_eq!(list_for_source(&db.conn, source).await.unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -473,6 +600,8 @@ mod tests {
                 trigger_kind: TRIGGER_AFTER.into(),
                 fire_at: Some(Utc::now() + chrono::Duration::seconds(30)),
                 delay_ms: Some(30_000),
+                target_mode: TARGET_MODE_CURRENT.into(),
+                target_conversation_ids: vec![],
                 prompt: "ping".into(),
                 display_name: None,
                 creator_kind: "user".into(),
@@ -505,6 +634,8 @@ mod tests {
                 trigger_kind: TRIGGER_AFTER.into(),
                 fire_at: Some(Utc::now() + chrono::Duration::seconds(30)),
                 delay_ms: Some(30_000),
+                target_mode: TARGET_MODE_CURRENT.into(),
+                target_conversation_ids: vec![],
                 prompt: "ping".into(),
                 display_name: None,
                 creator_kind: "user".into(),

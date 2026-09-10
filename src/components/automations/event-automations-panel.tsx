@@ -390,6 +390,7 @@ export function EventAutomationsPanel({
               }
               rule={editing === "new" ? null : editing}
               initialScope={editing === "new" ? initialScope : undefined}
+              currentConversationId={conversationId}
               conversations={conversations}
               folders={folderOptions}
               agentTypes={agentTypes}

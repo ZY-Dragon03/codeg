@@ -93,6 +93,10 @@ The automation registry MUST treat `pending` and `dispatching` as active (checke
 
 `timer_after` rearm MUST restart the persisted `delay_ms` from now. Past `timer_at` values MUST require editing before rearm. Stale `process_exit` terminal bindings MUST require selecting a live tracked task.
 
+Wake delivery MUST use the shared automation target contract: `current`, `all_current`, or `specific_multiple`. `all_current` is a fixed snapshot of eligible conversation ids captured at save time; it MUST NOT expand when new conversations are created. `specific_multiple` MUST persist every selected conversation id. A Wake with multiple targets MUST remain one persisted wake and one registry item, and dispatch MUST resume each existing target conversation through the shared resolver, recording a failed status with target details if any delivery fails.
+
+The Wake editor MUST use the same conversation target picker as Content Detection and Completion Forwarding. The default editor surface MUST stay compact; only the specific-conversations mode may open the searchable, active-first multi-select. The Wake source conversation remains the persisted owner for management and provenance, separate from its delivery targets.
+
 #### Scenario: One-shot success deactivates wake
 
 - **WHEN** a wake fires successfully and its status becomes `sent`
@@ -102,3 +106,8 @@ The automation registry MUST treat `pending` and `dispatching` as active (checke
 
 - **WHEN** a user re-enables a consumed `timer_after` wake
 - **THEN** the backend MUST set `fire_at = now + delay_ms` using the persisted delay, not the original `created_at`
+
+#### Scenario: One wake delivers to a saved target snapshot
+
+- **WHEN** a user saves a Wake for All current conversations or Specific conversations
+- **THEN** the system MUST keep one wake row, send the prompt to each saved target conversation after resuming it if needed, and retain target-specific failure details without spawning replacement conversations

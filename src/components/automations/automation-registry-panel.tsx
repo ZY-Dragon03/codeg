@@ -406,6 +406,7 @@ export function AutomationRegistryPanel({
           initialAutomationType={
             editingRule === "new" ? newAutomationType : undefined
           }
+          currentConversationId={conversationId}
           subpageTitle={ruleSubpageTitle}
           conversations={conversations}
           folders={folders.map((f) => ({

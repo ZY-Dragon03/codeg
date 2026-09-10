@@ -8,6 +8,7 @@ use serde::Serialize;
 
 use crate::db::entities::{agent_wake, event_rule};
 use crate::db::error::DbError;
+use crate::db::service::agent_wake_service;
 use crate::event_rules::types::EventRuleConfig;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -33,6 +34,8 @@ pub struct AutomationRegistryItem {
     pub source_conversation_id: Option<i32>,
     pub target_conversation_id: Option<i32>,
     pub target: Option<String>,
+    pub target_mode: Option<String>,
+    pub target_conversation_ids: Option<Vec<i32>>,
     pub trigger_kind: String,
     pub fire_at: Option<DateTime<Utc>>,
     pub schedule: Option<WakeSchedule>,
@@ -98,6 +101,8 @@ fn rule_item(row: event_rule::Model) -> Result<AutomationRegistryItem, DbError> 
         source_conversation_id: None,
         target_conversation_id: None,
         target: None,
+        target_mode: None,
+        target_conversation_ids: None,
         trigger_kind: "lifecycle_event".into(),
         fire_at: None,
         schedule: None,
@@ -167,6 +172,8 @@ fn wake_item(row: agent_wake::Model) -> AutomationRegistryItem {
         source_conversation_id: Some(row.source_conversation_id),
         target_conversation_id: Some(row.source_conversation_id),
         target: Some(format!("conversation:{}", row.source_conversation_id)),
+        target_mode: Some(row.target_mode.clone()),
+        target_conversation_ids: agent_wake_service::target_ids(&row).ok(),
         trigger_kind: row.trigger_kind.clone(),
         fire_at: row.fire_at,
         schedule: Some(wake_schedule(&row)),
@@ -200,6 +207,8 @@ mod tests {
                 trigger_kind: TRIGGER_AT.into(),
                 fire_at: Some(Utc::now() + chrono::Duration::seconds(20)),
                 delay_ms: None,
+                target_mode: agent_wake_service::TARGET_MODE_CURRENT.into(),
+                target_conversation_ids: vec![],
                 prompt: "wake me".into(),
                 display_name: None,
                 creator_kind: "agent".into(),

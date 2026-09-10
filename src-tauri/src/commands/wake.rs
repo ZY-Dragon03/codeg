@@ -19,6 +19,10 @@ pub struct WakeDraft {
     pub fire_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub delay_ms: Option<i64>,
+    #[serde(default = "default_target_mode")]
+    pub target_mode: String,
+    #[serde(default)]
+    pub target_conversation_ids: Vec<i32>,
     pub prompt: String,
     #[serde(default)]
     pub display_name: Option<String>,
@@ -31,6 +35,10 @@ fn default_creator_kind() -> String {
     "user".into()
 }
 
+fn default_target_mode() -> String {
+    agent_wake_service::TARGET_MODE_CURRENT.into()
+}
+
 fn draft_to_create(draft: WakeDraft) -> CreateWake {
     CreateWake {
         source_conversation_id: draft.source_conversation_id,
@@ -40,6 +48,8 @@ fn draft_to_create(draft: WakeDraft) -> CreateWake {
         trigger_kind: draft.trigger_kind,
         fire_at: draft.fire_at,
         delay_ms: draft.delay_ms,
+        target_mode: draft.target_mode,
+        target_conversation_ids: draft.target_conversation_ids,
         prompt: draft.prompt,
         display_name: draft.display_name,
         creator_kind: draft.creator_kind,

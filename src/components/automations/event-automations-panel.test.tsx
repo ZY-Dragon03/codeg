@@ -129,11 +129,6 @@ describe("EventAutomationsPanel product surface", () => {
       screen.getByRole("button", { name: zhCN.EventAutomations.newRule })
     )
     fireEvent.click(
-      screen.getByRole("button", {
-        name: new RegExp(zhCN.EventAutomations.editor.advanced),
-      })
-    )
-    fireEvent.click(
       screen.getByRole("button", { name: zhCN.EventAutomations.editor.save })
     )
 

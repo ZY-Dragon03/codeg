@@ -9,6 +9,7 @@ Enable users to create, edit, test and observe event automations from global and
 系统 MUST 提供 Automations Scheduled/Event 页签和 Conversation 独立 Event Automation 按钮，共用规则数据和编辑器。
 
 #### Scenario: 当前会话创建后全局编辑
+
 - **WHEN** 用户从持久化会话 C 创建规则
 - **THEN** 全局列表 MUST 显示同一 id，编辑/启停后两入口 MUST 读取相同配置，用户无需 API/DB/Agent
 
@@ -17,6 +18,7 @@ Enable users to create, edit, test and observe event automations from global and
 系统 MUST 支持 global/conversation/folder/agent_type scope，从 C 打开 MUST 默认 scope=C，并在执行前校验。
 
 #### Scenario: 两会话相同错误
+
 - **WHEN** C 专属规则启用，C 和 D 出现相同错误
 - **THEN** 该规则 MUST 仅响应 C，不能将 target=C 误当作事件 scope
 
@@ -25,10 +27,12 @@ Enable users to create, edit, test and observe event automations from global and
 系统 MUST 提供支持的 Trigger、condition type、keywords、ANY/ALL、regex、error_kind、prompt、max_attempts、cooldown、priority、enabled。条件类型 MUST 明示互斥，ANY/ALL MUST 仅作用 keywords。
 
 #### Scenario: ANY 与 ALL
+
 - **WHEN** keywords 为 RetriableError 和 TLS，样本只含 TLS
 - **THEN** ANY MUST 匹配，ALL MUST 不匹配
 
 #### Scenario: 不支持的 Trigger
+
 - **WHEN** 当前只支持 turn_failed
 - **THEN** 其他 Trigger MUST 不可保存为启用规则，界面 MUST 标明尚不可用
 
@@ -37,22 +41,30 @@ Enable users to create, edit, test and observe event automations from global and
 TLS 模板 MUST 默认关闭，允许修改条件/prompt/guards，重启 MUST 保留编辑。
 
 #### Scenario: 模板改为 X 和 Y
+
 - **WHEN** 用户将 keywords 改为 X、prompt 改为 Y 后启用
 - **THEN** 匹配 X MUST 发送 Y，旧关键词不得因硬编码继续命中
 
-### Requirement: 权威预览和输入校验
+### Requirement: 权威校验与编辑器表面
 
-系统 MUST 提供与真实执行同语义的无副作用预览；拒绝非法 regex、空关键词/空 prompt/非法 guard。预览 MUST 显示 scope、匹配结果和目标，MUST NOT 消耗 attempts 或发送。
+系统 MUST 拒绝非法 regex、空关键词/空 prompt/非法 guard。后端预览 API MAY 保留供内部诊断或自动化测试使用，但普通产品编辑器 MUST NOT 暴露“测试匹配”“测试规则”“Preview Rule”或等价的样本输入、运行测试和匹配结果区块。
 
 #### Scenario: 非法正则
+
 - **WHEN** 用户填写无效 regex
 - **THEN** 系统 MUST 显示错误并拒绝保存/启用
+
+#### Scenario: 编辑器不暴露测试匹配
+
+- **WHEN** 用户打开内容检测、任务完成后转发或唤醒的创建/编辑页面
+- **THEN** 编辑器 MUST NOT 显示测试匹配、测试规则、Preview Rule、Test Match 或对应的样本输入和运行测试控件
 
 ### Requirement: first-match 可解释
 
 系统 MUST 按 priority 降序、同 priority 按稳定 id 升序选第一条匹配规则，显示遮蔽关系；guard 拦截 MUST NOT 转投下一规则。
 
 #### Scenario: 全局规则遮蔽专属规则
+
 - **WHEN** 两者均匹配，全局规则排序在前
 - **THEN** 预览 MUST 指明胜出规则和专属规则未执行的原因
 
@@ -61,10 +73,12 @@ TLS 模板 MUST 默认关闭，允许修改条件/prompt/guards，重启 MUST �
 系统 MUST 展示源/目标、发送、guard 跳过和错误记录；max_attempts/cooldown MUST 实际限制发送。Desktop/Web MUST 可操作相同功能。
 
 #### Scenario: 上限与冷却
+
 - **WHEN** 同规则同源会话已自动尝试三次或处于冷却期
 - **THEN** MUST 不再发送并显示原因
 
 #### Scenario: 关闭规则
+
 - **WHEN** 用户关闭规则后产生匹配事件
 - **THEN** MUST 不执行该规则，刷新后 MUST 保持关闭
 
@@ -104,7 +118,6 @@ Content rules MUST select AI output, error or both and support Contains ANY/ALL,
 
 Forward after task completion MUST trigger only on `TurnComplete(stop_reason=end_turn)`. Cancellation, refusal and failure are not completion. The Agent Report is the final assistant text from the just-ended turn, frozen after settle, excluding prior turns, reviewer/tool/reasoning text; empty reports are marked unavailable.
 
-
 #### Scenario: Contract is observable
 
 - **WHEN** the product receives the event or request described by this requirement
@@ -113,7 +126,6 @@ Forward after task completion MUST trigger only on `TurnComplete(stop_reason=end
 ### Requirement: Payload and recent-message extraction MUST be explicit
 
 The editor MUST provide toggles for source conversation info, recent valid user message and final report, plus an additional prompt textarea. Recent valid user message extraction walks backward from the completed turn and skips editable Exact/Contains/Regex ignore rules, defaulting to “继续” and “continue”.
-
 
 #### Scenario: Contract is observable
 
@@ -124,7 +136,6 @@ The editor MUST provide toggles for source conversation info, recent valid user 
 
 An action MAY include the source conversation and multiple existing targets. The UI MUST show title/agent/folder instead of raw ids. Each target MUST have an independent intent, receipt and log; partial success MUST remain visible. The same turn/rule/target MUST be idempotent.
 
-
 #### Scenario: Contract is observable
 
 - **WHEN** the product receives the event or request described by this requirement
@@ -134,7 +145,6 @@ An action MAY include the source conversation and multiple existing targets. The
 
 Preview MUST distinguish `target_exists` from runtime availability and MUST NOT consume guards, send, or write execution logs. Logs MUST preserve source and target titles/ids, prompt snapshot, trigger, action, guard reason and explicit errors such as action-sent/log-write-failed.
 
-
 #### Scenario: Contract is observable
 
 - **WHEN** the product receives the event or request described by this requirement
@@ -143,7 +153,6 @@ Preview MUST distinguish `target_exists` from runtime availability and MUST NOT 
 ### Requirement: UI localization MUST match native Codeg locales
 
 All Event Automation user-facing strings MUST use next-intl and the ten existing locales with identical key sets. Machine values such as trigger and action may appear only in technical details. An unsaved conversation header button MUST be disabled and explain that a first message is required.
-
 
 #### Scenario: Contract is observable
 
@@ -170,6 +179,14 @@ The conversation-header automation dialog MUST use a fixed outer width that does
 
 Registry is the level-one surface inside the dialog. Content Detection, Completion Forwarding, and Wake editors are level-two subpages inside the registry and MUST render inside a distinct bordered, rounded, padded surface with a divider between the subpage header and form body. The outer dialog close control MUST dismiss the entire automation window; the inner back control MUST return to the registry list only.
 
+Each automation editor subpage MUST keep only “Back to Automation List” in its sticky secondary navigation. The creation/edit title, rule name, and all form sections MUST remain normal scrolling content. Generic sections such as “When…” and their descriptions MUST be fully visible below the sticky navigation and MUST NOT be clipped when the editor scrolls or focuses a field. Sticky navigation MUST use an opaque or sufficiently solid background, correct stacking order, and stable padding without changing dialog width or causing horizontal layout shifts. Section anchors and focus scrolling MUST account for the sticky offset (for example with scroll padding or scroll margin).
+
+The Content Detection, Completion Forwarding, and Wake editors MUST share one editor design language and one conversation delivery target picker. The picker MUST expose Current conversation, All current conversations, and Specific conversations. Only Specific conversations MAY expand the searchable multi-select; All current conversations MUST save the current eligible conversations as a fixed snapshot and MUST NOT silently include future conversations. Search, active-first/recency sorting, titles, agent metadata, selected state, and scrolling MUST use the shared picker component.
+
+The editor MUST distinguish the conversations where an automation listens from the conversations that receive its action. The three automation types MUST persist the same target contract, and a Wake MUST remain one registry item even when it has multiple saved target conversations.
+
+The editor MUST NOT expose an Advanced Settings container. Meaningful priority and listening-scope controls MUST appear as ordinary sections without exposing internal names such as `RuleScope`, `conversation_ref`, or raw ids. The existing product editor MUST continue to omit test-match and rule-preview controls.
+
 #### Scenario: Switching wake trigger modes
 
 - **WHEN** a user opens wake creation and switches among delay, scheduled time, and process-exit triggers
@@ -180,6 +197,21 @@ Registry is the level-one surface inside the dialog. Content Detection, Completi
 - **WHEN** a user opens content detection or completion forwarding from the registry
 - **THEN** the UI MUST show a back link to the registry list and the editor form inside a secondary surface rather than bare form fields in the dialog root
 
+#### Scenario: Scrolling an editor subpage
+
+- **WHEN** the user scrolls content detection, completion forwarding, or wake creation/editing
+- **THEN** only the back navigation remains sticky; creation/edit titles and rule names MAY scroll away, while “When…”, “Then automatically send”, and “Automatic recovery limits” headings remain fully readable and the dialog width stays unchanged
+
+#### Scenario: Shared delivery targets
+
+- **WHEN** the user opens Content Detection, Completion Forwarding, or Wake editing
+- **THEN** each editor MUST show the same compact delivery target choices; the default view MUST contain no conversation list, and only Specific conversations MAY reveal the shared searchable multi-select
+
+#### Scenario: Fixed all-current snapshot
+
+- **WHEN** the user saves All current conversations
+- **THEN** the automation MUST persist the eligible conversations present at save time as its target snapshot and MUST NOT add a later conversation implicitly
+
 #### Scenario: No running programs
 
 - **WHEN** no eligible running terminal exists for process-exit wake creation
@@ -189,7 +221,7 @@ Registry is the level-one surface inside the dialog. Content Detection, Completi
 
 In the automation registry, Wake rows MUST use the same active control pattern as Event Rules. `pending` and `dispatching` MUST render as active/checked. `sent`, `failed`, and `cancelled` MUST render as inactive/unchecked. The checked state MUST be derived only from wake `status` (and legacy rows without status while still enabled), not from a separate frontend enabled flag.
 
-A successful one-shot fire MUST automatically move the wake from active to inactive in the registry UI after refresh. Unchecking an active pending wake MUST mean cancel and MUST call the existing cancel API after explicit confirmation. Terminal wakes MUST be re-enabled through `wake_rearm` or edit-and-save, not by silently toggling a disabled switch. Switching OFF cancels; Trash permanently deletes.
+A successful one-shot fire MUST automatically move the wake from active to inactive in the registry UI after refresh. Unchecking an active pending wake MUST mean cancel and MUST call the existing cancel API immediately, without a second confirmation dialog. Terminal wakes MUST be re-enabled through `wake_rearm` or edit-and-save, not by silently toggling a disabled switch. Switching OFF cancels; Trash permanently deletes.
 
 #### Scenario: Pending wake shows active
 
@@ -203,7 +235,7 @@ A successful one-shot fire MUST automatically move the wake from active to inact
 
 #### Scenario: Unchecking an active wake cancels it
 
-- **WHEN** a user unchecks an active pending wake and confirms cancellation
+- **WHEN** a user unchecks an active pending wake
 - **THEN** the wake MUST be cancelled via the existing cancel API and the row MUST reload as unchecked with status cancelled
 
 #### Scenario: Inactive wake can be rearmed
